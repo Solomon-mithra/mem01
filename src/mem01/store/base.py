@@ -1,8 +1,8 @@
 """BeliefStore protocol — the only door to persistence.
 
-Why a protocol (interface) instead of talking to SQLite everywhere:
-- apply_ops and recall stay pure logic; we can unit-test with RAM
-- Later swap InMemory → SQLite → Postgres+pgvector without rewriting pipelines
+Why a protocol (interface) instead of talking to Postgres everywhere:
+- apply_ops and recall stay pure logic; unit tests use InMemoryBeliefStore
+- Prod/dev deploy uses Postgres+pgvector (Docker or Neon)
 """
 
 from __future__ import annotations

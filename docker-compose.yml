@@ -1,14 +1,16 @@
-# Local production-like Postgres + pgvector for mem01
-# Usage:
-#   docker compose up -d
-#   export DATABASE_URL=postgresql://mem01:mem01@localhost:5432/mem01
-#   pip install -e '.[postgres,dev]'
+# Full self-hosted stack: Postgres+pgvector + mem01 API
+#
+#   cp .env.example .env   # set OPENAI_API_KEY
+#   docker compose up -d --build
+#
+# API:  http://localhost:8080/health
+# Docs: http://localhost:8080/docs
+# DB:   localhost:5433  (user/pass/db: mem01)
 
 services:
   postgres:
     image: pgvector/pgvector:pg16
     ports:
-      # Host 5433 avoids clashing with a local Postgres on 5432
       - "5433:5432"
     environment:
       POSTGRES_USER: mem01
@@ -20,7 +22,28 @@ services:
       test: ["CMD-SHELL", "pg_isready -U mem01 -d mem01"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 12
+
+  mem01:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgresql://mem01:mem01@postgres:5432/mem01
+      MEM01_EMBEDDING_DIM: ${MEM01_EMBEDDING_DIM:-1536}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      MEM01_LLM_MODEL: ${MEM01_LLM_MODEL:-gpt-4o-mini}
+      MEM01_EMBED_MODEL: ${MEM01_EMBED_MODEL:-text-embedding-3-small}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
 volumes:
   mem01_pgdata:

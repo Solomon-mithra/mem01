@@ -1,7 +1,7 @@
 """Postgres + pgvector BeliefStore — production self-hosted backend.
 
 Use when others run mem01 on their server (or Neon).
-Same BeliefStore protocol as SQLite/InMemory — swap via DATABASE_URL.
+Same BeliefStore protocol as InMemory (tests) — swap via DATABASE_URL.
 
 Requires:
   pip install 'mem01[postgres]'

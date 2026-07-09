@@ -1,21 +1,18 @@
 """Create a BeliefStore from env / URL.
 
-Production (self-hosted or Neon):
-  DATABASE_URL=postgresql://...
-  or MEM01_DATABASE_URL=...
+Production & dev (same stack):
+  DATABASE_URL=postgresql://...   # local docker or Neon
 
-Local dev (default):
-  sqlite file or in-memory if unset
+Tests only:
+  MEM01_STORE=memory              # InMemoryBeliefStore (no DB)
 """
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from mem01.env import load_env
 from mem01.store.memory_store import InMemoryBeliefStore
-from mem01.store.sqlite_store import SqliteBeliefStore
 
 
 def create_belief_store(
@@ -23,16 +20,16 @@ def create_belief_store(
     *,
     embedding_dim: int | None = None,
 ):
-    """Return InMemory, Sqlite, or Postgres store based on *url* / env.
+    """Return Postgres+pgvector store, or in-memory for unit tests.
 
-    URL schemes:
-      - unset / empty → InMemoryBeliefStore (tests) if MEM01_STORE=memory,
-        else SqliteBeliefStore at ./data/mem01.db
-      - sqlite:///:memory: or :memory: → SQLite memory
-      - sqlite:///path or path ending .db → SQLite file
-      - postgresql://... or postgres://... → PostgresBeliefStore + pgvector
+    SQLite is not supported — use docker compose (or Neon) for real runs.
     """
     load_env()
+
+    backend = os.environ.get("MEM01_STORE", "").strip().lower()
+    if url is None and backend in ("memory", "mem", "inmemory"):
+        return InMemoryBeliefStore()
+
     if url is None:
         url = (
             os.environ.get("MEM01_DATABASE_URL")
@@ -46,30 +43,18 @@ def create_belief_store(
         dim = int(raw) if raw else 1536
 
     if not url:
-        backend = os.environ.get("MEM01_STORE", "sqlite").strip().lower()
-        if backend in ("memory", "mem", "inmemory"):
-            return InMemoryBeliefStore()
-        path = os.environ.get("MEM01_SQLITE_PATH", "data/mem01.db")
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        return SqliteBeliefStore(path)
+        raise RuntimeError(
+            "DATABASE_URL is required (Postgres + pgvector).\n\n"
+            "  docker compose up -d\n"
+            "  # .env:\n"
+            "  DATABASE_URL=postgresql://mem01:mem01@localhost:5433/mem01\n\n"
+            "Or Neon:\n"
+            "  DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require\n\n"
+            "Unit tests only: MEM01_STORE=memory\n"
+        )
 
     lower = url.lower()
-    if lower in (":memory:", "sqlite:///:memory:", "sqlite://memory"):
-        return SqliteBeliefStore(":memory:")
-
-    if lower.startswith("sqlite:///"):
-        path = url[len("sqlite:///") :]
-        if path not in (":memory:",):
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
-        return SqliteBeliefStore(path)
-
-    if lower.endswith(".db") or lower.startswith("sqlite:"):
-        path = url.removeprefix("sqlite:")
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        return SqliteBeliefStore(path)
-
     if lower.startswith("postgres://") or lower.startswith("postgresql://"):
-        # Neon sometimes uses postgres:// — psycopg accepts both
         from mem01.store.postgres_store import PostgresBeliefStore
 
         dsn = url
@@ -79,5 +64,5 @@ def create_belief_store(
 
     raise ValueError(
         f"Unsupported store URL: {url!r}. "
-        "Use postgresql://... (or Neon), sqlite:///path, or leave unset for local SQLite."
+        "Use postgresql://... (Docker Postgres or Neon)."
     )

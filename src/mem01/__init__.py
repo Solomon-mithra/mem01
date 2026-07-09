@@ -9,7 +9,6 @@ from mem01.store import (
     BeliefStore,
     InMemoryBeliefStore,
     ScopeFilter,
-    SqliteBeliefStore,
     create_belief_store,
 )
 from mem01.types import (
@@ -42,7 +41,6 @@ __all__ = [
     "ScopeIds",
     "ScopeKind",
     "ScoredBelief",
-    "SqliteBeliefStore",
     "create_belief_store",
     "new_belief_id",
 ]

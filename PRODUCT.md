@@ -42,7 +42,7 @@ It does what mem0 does — extract durable information, store it, retrieve it ac
 - Full temporal knowledge graph (Zep / Graphiti territory) as the core path
 - Multi-tenant SaaS platform first (customers run mem01 on *their* server; SaaS multi-tenant comes later)
 - Agent self-edit as the default write path (extra LLM round-trips)
-- SQLite as the production store (SQLite = dev; prod = Postgres+pgvector / Neon)
+- SQLite (removed — Postgres+pgvector for dev and self-hosted prod; Neon interchangeable)
 
 ### Success bar vs mem0
 
@@ -287,7 +287,7 @@ Development time is not the bottleneck; order is about risk and product focus.
 
 These do not change the product thesis; they are implementation choices:
 
-- [x] Primary store: **Postgres + pgvector** (prod / Neon); SQLite + in-memory for dev/tests
+- [x] Primary store: **Postgres + pgvector** (Docker + self-hosted / Neon); in-memory only for unit tests
 - [ ] Extraction model routing (cheap model vs strong model for writes)
 - [ ] Exact ranking formula for the packer
 - [ ] Multi-tenant / auth model **only if** we productize SaaS later
