@@ -26,13 +26,18 @@ requires_pg = pytest.mark.skipif(
 @pytest.fixture
 def store():
     from mem01.store.postgres_store import PostgresBeliefStore
+    import psycopg
+    from psycopg.rows import dict_row
 
-    # Use small dim for faster local tests
+    # Reset schema so embedding_dim=4 is not blocked by a prior vector(N) column
+    with psycopg.connect(DSN, row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            cur.execute("DROP TABLE IF EXISTS embeddings CASCADE")
+            cur.execute("DROP TABLE IF EXISTS beliefs CASCADE")
+        conn.commit()
+
     s = PostgresBeliefStore(DSN, embedding_dim=4)
-    # Clean tables for isolation
-    with s._conn.cursor() as cur:
-        cur.execute("TRUNCATE embeddings, beliefs CASCADE")
-    s._conn.commit()
     yield s
     s.close()
 

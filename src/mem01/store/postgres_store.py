@@ -274,18 +274,22 @@ class PostgresBeliefStore:
                 f"embedding dim {len(vector)} != store dim {self.embedding_dim}. "
                 "Match embedder (text-embedding-3-small → 1536) or set embedding_dim=."
             )
-        with self._conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO embeddings (belief_id, embedding, dim)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (belief_id) DO UPDATE SET
-                    embedding = EXCLUDED.embedding,
-                    dim = EXCLUDED.dim
-                """,
-                (belief_id, vector, len(vector)),
-            )
-        self._conn.commit()
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO embeddings (belief_id, embedding, dim)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (belief_id) DO UPDATE SET
+                        embedding = EXCLUDED.embedding,
+                        dim = EXCLUDED.dim
+                    """,
+                    (belief_id, vector, len(vector)),
+                )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def get_embedding(self, belief_id: str) -> list[float] | None:
         with self._conn.cursor() as cur:
