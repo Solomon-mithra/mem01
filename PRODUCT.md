@@ -1,9 +1,9 @@
 # mem01 — Product Design
 
 **One-stop product brief.**  
-Status: design locked (2026-07-08) · Core engine in progress · Prod store: Postgres+pgvector  
-Positioning: a general agent memory layer that is a **better product than mem0**, under hard **cost / tokens / latency** constraints.  
-Deploy shape (v1): **self-hosted** on the customer’s server (not multi-tenant SaaS yet).
+Status: **core engine + self-hosted stack live** (beliefs, write/read pipelines, Postgres+pgvector, Docker Compose, HTTP API). MCP and cold consolidation still to ship.  
+Positioning: a general agent memory layer that is a **better product than mem0** on correctness under evolution, under hard **cost / tokens / latency** constraints.  
+Deploy shape (v1): **self-hosted** — others run mem01 on *their* server (not multi-tenant SaaS yet).
 
 ---
 
@@ -21,6 +21,13 @@ It does what mem0 does — extract durable information, store it, retrieve it ac
 
 > A general memory layer like mem0, with a real belief model (add / update / supersede / invalidate), light time validity, and aggressive budgeted retrieval — so agents stay correct longer while matching or beating mem0 on tokens and latency.
 
+### Who runs it
+
+| Mode | What it means |
+|------|----------------|
+| **v1 Self-hosted** | Customer (or you) runs `docker compose` (or equivalent) on their infra; plugs agents into the HTTP API / Python SDK |
+| **Later SaaS** | You host multi-tenant mem01 cloud — **not** the current milestone |
+
 ---
 
 ## 2. Goals and non-goals
@@ -34,15 +41,17 @@ It does what mem0 does — extract durable information, store it, retrieve it ac
 | Token discipline | Same or better quality at ≤ mem0-class context size |
 | Latency discipline | Fast hot-path recall; no “wait for graph to finish” |
 | Long-horizon quality | Memory does not rot after months of use |
-| mem0-class simplicity | Simple API + MCP packaging |
+| mem0-class simplicity | Simple API + easy self-host packaging |
+| Prod-shaped dev | Dev uses the same stack shape as deploy (Postgres + API), not a toy DB |
 
 ### Non-goals (v1)
 
-- Beating every public benchmark as the primary success metric
-- Full temporal knowledge graph (Zep / Graphiti territory) as the core path
-- Multi-tenant SaaS platform first (customers run mem01 on *their* server; SaaS multi-tenant comes later)
+- Beating every public benchmark as the primary success metric (benchmarks are evidence)
+- Full temporal knowledge graph (Zep / Graphiti) as the core path
+- Multi-tenant SaaS platform first (auth, billing, org isolation) — only when we push SaaS
 - Agent self-edit as the default write path (extra LLM round-trips)
-- SQLite (removed — Postgres+pgvector for dev and self-hosted prod; Neon interchangeable)
+- **SQLite** — removed; not used for dev or prod
+- Local-only “file DB” as the story — local **is** Docker Postgres + mem01 API
 
 ### Success bar vs mem0
 
@@ -53,7 +62,7 @@ It does what mem0 does — extract durable information, store it, retrieve it ac
 | Latency | ≤ mem0 p50/p95 recall (or within a tight band, e.g. +10% p95 max) |
 | Cost | Fewer or equal LLM calls per write; transparent $ per 1k turns |
 
-Benchmarks (LoCoMo, LongMemEval, etc.) are **evidence**, not the product.
+Benchmarks (LoCoMo, LongMemEval, etc.) are **evidence**, not the product. Internal product suite (staleness / supersede) is the defining gate.
 
 ---
 
@@ -68,7 +77,7 @@ We compete as **belief management + efficient retrieval**.
 | **Co-primary** | Light temporal validity (`valid_from` / `valid_to`, not full graph) |
 | **Always-on systems** | Budgeted token packing + offline consolidation (“sleep”) |
 | **Hard constraints** | Cost, tokens, latency as release gates |
-| **Packaging** | mem0-like API + MCP |
+| **Packaging** | HTTP API + Python SDK; Docker Compose; MCP later |
 | **Optional GTM** | Coding agents as first showcase (Claude / Cursor / Grok sharing project memory) |
 
 ### Why this wedge
@@ -135,7 +144,32 @@ Default product behavior: share **user + project**; keep **session** ephemeral; 
 
 ## 5. Architecture
 
-Hot path (every turn) stays fast and cheap. Cold path improves quality over time.
+### Runtime stack (dev = prod-shaped)
+
+```
+┌─────────────────────────────────────────────────────┐
+│  docker compose                                     │
+│  ┌─────────────────┐     ┌────────────────────────┐ │
+│  │  mem01 API      │────▶│  Postgres + pgvector   │ │
+│  │  :8080          │     │  :5433 (host)          │ │
+│  │  FastAPI        │     │  beliefs + embeddings  │ │
+│  └─────────────────┘     └────────────────────────┘ │
+└─────────────────────────────────────────────────────┘
+         ▲
+         │ HTTP / Python SDK
+    customer agents / apps
+```
+
+| Component | Role |
+|-----------|------|
+| **mem01 API** | `remember` / `recall` / `correct` / `forget` |
+| **Postgres + pgvector** | Production store; vector cosine search in DB |
+| **Neon** | Optional hosted Postgres — same `DATABASE_URL`, same code |
+| **In-memory store** | **Unit tests only** (`MEM01_STORE=memory`) — not a deploy mode |
+
+SQLite is **not** part of the product.
+
+### Pipelines
 
 ```
 WRITE (async-friendly)                 READ (hot — must be fast)
@@ -152,11 +186,11 @@ messages / events                      query + scopes
  INVALIDATE / MERGE                             │
         │                                       ▼
         ▼                              compact memory block
- store beliefs with                    (mem0-sized or smaller)
-  status, validity, source
+ Postgres beliefs +                    (mem0-sized or smaller)
+  embeddings (pgvector)
 
 
-COLD PATH (minutes–hours — not on the request path)
+COLD PATH (minutes–hours — not on the request path)  [planned]
 ───────────────────────────────────────────────────
  cluster duplicates → MERGE
  decay low-value / unused
@@ -173,38 +207,67 @@ COLD PATH (minutes–hours — not on the request path)
 4. **Supersede is structured at write time**, not “hope embeddings are close.”
 5. **Graph is optional later**, only for queries that fail vector; never blocks hot path.
 6. **Always measure:** quality, tokens injected, p95 latency, LLM calls per write.
+7. **Deploy uses Postgres+pgvector** — not a separate “toy” store for development.
 
 If a feature breaks (1) or (2), it is cold-path or advanced — not core.
 
 ---
 
-## 6. API surface (mem0-class simplicity)
+## 6. API surface
 
-Conceptual interface (names may change in implementation):
+### Python SDK (`MemoryClient`)
 
 ```text
-remember(content | messages, user_id, project_id?, ...)
+remember(messages, user_id, project_id?, ...)
   → extract + belief ops → store
 
 recall(query, user_id, project_id?, max_memory_tokens, ...)
   → budgeted, conflict-safe memory block
 
 correct(memory_id, new_value)
-  → human/agent fix → SUPERSEDE
+  → SUPERSEDE by id
 
-forget(memory_id | query)
-  → INVALIDATE
+forget(memory_id)
+  → INVALIDATE by id
 ```
+
+`create_belief_store()` reads `DATABASE_URL` (required for real runs).
+
+### HTTP API (shipped)
+
+Base URL (Docker): `http://localhost:8080`
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/health` | Liveness |
+| POST | `/v1/remember` | Extract + store beliefs |
+| POST | `/v1/recall` | Budgeted conflict-safe recall |
+| POST | `/v1/correct` | SUPERSEDE by id |
+| POST | `/v1/forget` | INVALIDATE by id |
+| GET | `/docs` | OpenAPI UI |
 
 ### Packaging
 
-| Interface | Purpose |
-|-----------|---------|
-| HTTP / SDK API | Drop-in memory layer (mem0-like DX) |
-| MCP server | Claude, Cursor, and other MCP agents share the same store |
-| Optional proxy hooks | Later: inject memory on LLM calls |
+| Interface | Status | Purpose |
+|-----------|--------|---------|
+| **Docker Compose** | **Shipped** | Default self-host: Postgres + mem01 API |
+| **HTTP API** | **Shipped** | Language-agnostic plug-in for agents |
+| **Python SDK** | **Shipped** | In-process `MemoryClient` |
+| **MCP server** | Planned | Claude / Cursor shared store |
+| **Proxy hooks** | Later | Inject memory on every LLM call |
 
-Shared memory across Grok / Claude / Cursor is **not automatic**. It works only when each tool is wired to mem01 with the same identity (user / project). That is intentional packaging, not magic.
+Shared memory across Grok / Claude / Cursor is **not automatic**. It works only when each tool is wired to mem01 with the same identity (user / project).
+
+### How to run (canonical)
+
+```bash
+cp .env.example .env   # OPENAI_API_KEY, DATABASE_URL if calling API from host tools
+docker compose up -d --build
+# API: http://localhost:8080
+# DB:  localhost:5433 → mem01/mem01/mem01
+```
+
+Neon: set `DATABASE_URL` to the Neon Postgres URL (`?sslmode=require`); same application image/code.
 
 ---
 
@@ -243,7 +306,7 @@ Ship only when the scorecard is honest:
 | Latency | p50 / p95 end-to-end recall |
 | Cost | LLM calls per write; estimated $ per 1k turns |
 
-### Internal suite (product-defining)
+### Internal suite (product-defining) — implemented
 
 Cases mem0-class systems often fail:
 
@@ -253,6 +316,8 @@ Cases mem0-class systems often fail:
 - Multi-session identity with same user
 - Budget stress (strict `max_memory_tokens` still returns non-contradictory set)
 
+Early evidence: on the internal product suite (OpenAI stack), mem01 **5/5** vs mem0 **2/5** (staleness failures). Official LoCoMo remains optional evidence when budget/TPM allow.
+
 ---
 
 ## 10. What we deferred (and why)
@@ -260,37 +325,40 @@ Cases mem0-class systems often fail:
 | Deferred | Why |
 |----------|-----|
 | Heavy multi-hop graph | Tokens, latency, operational cost; crowded space |
-| Org multi-agent platform | Auth, tenancy, audit dominate before memory is better |
+| Multi-tenant SaaS | Needed only when *we* host for many customers |
 | Agent self-edit as default | Extra LLM tool calls on hot path |
-| Local-first as sole mode | Valuable feature later; not the core “better mem0” claim |
+| MCP server | Next packaging layer after HTTP |
+| Cold consolidation (“sleep”) jobs | Online path ships first; hygiene is phase 2 |
 | Pure leaderboard chasing | Pulls architecture toward expensive designs |
 
-Unlimited build time means we do the **correctness engine** properly — not that we build every memory paradigm at once.
+---
+
+## 11. Build status (phases)
+
+| Phase | Content | Status |
+|-------|---------|--------|
+| 1 | Belief model + ops + scopes | **Done** |
+| 2 | Write path (extract → apply_ops) | **Done** |
+| 3 | Hot recall (search → conflict → rank → pack) | **Done** |
+| 4 | `MemoryClient` + product conflict suite | **Done** |
+| 5 | Postgres + pgvector store | **Done** |
+| 6 | HTTP API + Docker Compose (API + DB) | **Done** |
+| 7 | SQLite removed; prod-shaped dev | **Done** |
+| 8 | Cold consolidation | Planned |
+| 9 | MCP server | Planned |
+| 10 | Optional: light graph, coding-agent templates | Later |
+| 11 | Official LoCoMo / LongMemEval when ready | Evidence |
 
 ---
 
-## 11. Suggested build phases (guidance only)
+## 12. Open decisions (remaining)
 
-Development time is not the bottleneck; order is about risk and product focus.
-
-1. **Belief store + ops** — schema, ADD/SUPERSEDE/INVALIDATE/MERGE, scopes  
-2. **Write path** — extraction that emits belief ops, not only new facts  
-3. **Hot recall** — vector + filters + conflict rules + token packer (0 LLM)  
-4. **API + MCP** — remember / recall / correct / forget  
-5. **Cold consolidation** — merge, decay, archive jobs  
-6. **Eval harness** — quality + tokens + latency gates vs mem0 baseline  
-7. **Optional** — light graph mode, agent-editable tools, local deploy, coding-agent templates  
-
----
-
-## 12. Open decisions (not yet locked)
-
-These do not change the product thesis; they are implementation choices:
-
-- [x] Primary store: **Postgres + pgvector** (Docker + self-hosted / Neon); in-memory only for unit tests
-- [ ] Extraction model routing (cheap model vs strong model for writes)
-- [ ] Exact ranking formula for the packer
-- [ ] Multi-tenant / auth model **only if** we productize SaaS later
+- [x] Primary store: **Postgres + pgvector** (Docker / self-hosted / Neon)
+- [x] Deploy: **docker compose** runs mem01 + Postgres
+- [x] SQLite: **removed**
+- [ ] Extraction model routing (cheap vs strong for writes)
+- [ ] Exact ranking formula tuning for the packer
+- [ ] Multi-tenant / auth **only if** SaaS later
 - [ ] Name/branding beyond working title **mem01**
 - [ ] First vertical demo (general chat vs coding-agent shared memory)
 
@@ -306,19 +374,23 @@ These do not change the product thesis; they are implementation choices:
 | **Supersede** | New belief replaces an old one cleanly |
 | **Token budget** | Max tokens of memory allowed into the model context |
 | **Scope** | Boundary of who/what a belief applies to (user, project, …) |
+| **Self-hosted** | Customer runs mem01 + DB on their infrastructure |
 
 ---
 
 ## 14. Summary
 
-**mem01** = mem0’s job (durable agent memory, simple API), done as a **belief system** with **time-aware supersession**, **conflict-safe budgeted retrieval**, and **offline hygiene** — so quality goes up without costing more tokens or latency.
+**mem01** = mem0’s job (durable agent memory, simple API), done as a **belief system** with **time-aware supersession**, **conflict-safe budgeted retrieval**, and **offline hygiene** (planned) — so quality goes up without costing more tokens or latency.
+
+**Ship shape today:** Docker Compose → **Postgres+pgvector + mem01 HTTP API**; plug agents in; swap DB to Neon via `DATABASE_URL` when wanted. Multi-tenant SaaS is a later product, not the current architecture.
 
 | We optimize for | We refuse |
 |-----------------|-----------|
 | Correctness under evolution | Graph-first complexity on the hot path |
 | Cost / tokens / latency | Accuracy-only leaderboard wins |
+| Self-hosted, prod-shaped stack | Toy SQLite “dev-only” story |
 | Product people will run for months | Demo-only SOTA tables |
 
 ---
 
-*This document is the source of truth for product intent. Implementation plans and code should live under `mem01/` alongside this file.*
+*This document is the source of truth for product intent. Implementation lives under `mem01/` (code, Docker, tests).*
