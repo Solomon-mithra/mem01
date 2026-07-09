@@ -50,7 +50,6 @@ It does what mem0 does — extract durable information, store it, retrieve it ac
 - Full temporal knowledge graph (Zep / Graphiti) as the core path
 - Multi-tenant SaaS platform first (auth, billing, org isolation) — only when we push SaaS
 - Agent self-edit as the default write path (extra LLM round-trips)
-- **SQLite** — removed; not used for dev or prod
 - Local-only “file DB” as the story — local **is** Docker Postgres + mem01 API
 
 ### Success bar vs mem0
@@ -62,7 +61,7 @@ It does what mem0 does — extract durable information, store it, retrieve it ac
 | Latency | ≤ mem0 p50/p95 recall (or within a tight band, e.g. +10% p95 max) |
 | Cost | Fewer or equal LLM calls per write; transparent $ per 1k turns |
 
-Benchmarks (LoCoMo, LongMemEval, etc.) are **evidence**, not the product. Internal product suite (staleness / supersede) is the defining gate.
+Benchmarks (LoCoMo, LongMemEval, etc.) are **evidence**, not the product.
 
 ---
 
@@ -165,9 +164,6 @@ Default product behavior: share **user + project**; keep **session** ephemeral; 
 | **mem01 API** | `remember` / `recall` / `correct` / `forget` |
 | **Postgres + pgvector** | Production store; vector cosine search in DB |
 | **Neon** | Optional hosted Postgres — same `DATABASE_URL`, same code |
-| **In-memory store** | **Unit tests only** (`MEM01_STORE=memory`) — not a deploy mode |
-
-SQLite is **not** part of the product.
 
 ### Pipelines
 
@@ -301,22 +297,10 @@ Ship only when the scorecard is honest:
 
 | Axis | What we track |
 |------|----------------|
-| Quality | Standard memory benchmarks + **internal conflict/staleness suite** |
+| Quality | Standard memory benchmarks; clear wins on conflict / staleness behavior |
 | Tokens | Avg memory tokens injected per turn |
 | Latency | p50 / p95 end-to-end recall |
 | Cost | LLM calls per write; estimated $ per 1k turns |
-
-### Internal suite (product-defining) — implemented
-
-Cases mem0-class systems often fail:
-
-- Preference changes (dark mode → light mode)
-- Location / job / relationship updates (supersede, not duplicate)
-- Explicit corrections (“forget that / that was wrong”)
-- Multi-session identity with same user
-- Budget stress (strict `max_memory_tokens` still returns non-contradictory set)
-
-Early evidence: on the internal product suite (OpenAI stack), mem01 **5/5** vs mem0 **2/5** (staleness failures). Official LoCoMo remains optional evidence when budget/TPM allow.
 
 ---
 
@@ -343,11 +327,11 @@ Early evidence: on the internal product suite (OpenAI stack), mem01 **5/5** vs m
 | 4 | `MemoryClient` + product conflict suite | **Done** |
 | 5 | Postgres + pgvector store | **Done** |
 | 6 | HTTP API + Docker Compose (API + DB) | **Done** |
-| 7 | SQLite removed; prod-shaped dev | **Done** |
+| 7 | Prod-shaped dev stack (same as deploy) | **Done** |
 | 8 | Cold consolidation | Planned |
 | 9 | MCP server | Planned |
 | 10 | Optional: light graph, coding-agent templates | Later |
-| 11 | Official LoCoMo / LongMemEval when ready | Evidence |
+| 11 | Public benchmarks when ready | Evidence |
 
 ---
 
@@ -355,7 +339,6 @@ Early evidence: on the internal product suite (OpenAI stack), mem01 **5/5** vs m
 
 - [x] Primary store: **Postgres + pgvector** (Docker / self-hosted / Neon)
 - [x] Deploy: **docker compose** runs mem01 + Postgres
-- [x] SQLite: **removed**
 - [ ] Extraction model routing (cheap vs strong for writes)
 - [ ] Exact ranking formula tuning for the packer
 - [ ] Multi-tenant / auth **only if** SaaS later
@@ -388,7 +371,7 @@ Early evidence: on the internal product suite (OpenAI stack), mem01 **5/5** vs m
 |-----------------|-----------|
 | Correctness under evolution | Graph-first complexity on the hot path |
 | Cost / tokens / latency | Accuracy-only leaderboard wins |
-| Self-hosted, prod-shaped stack | Toy SQLite “dev-only” story |
+| Self-hosted, prod-shaped stack | Separate toy stack for development |
 | Product people will run for months | Demo-only SOTA tables |
 
 ---
