@@ -1,9 +1,9 @@
 """mem01 — belief-based agent memory.
 
-Public API grows as we implement the client.
 See PRODUCT.md for product intent and IMPLEMENTATION_PLAN.md for build order.
 """
 
+from mem01.client import MemoryClient, RememberResult
 from mem01.ids import new_belief_id
 from mem01.store import BeliefStore, InMemoryBeliefStore, ScopeFilter, SqliteBeliefStore
 from mem01.types import (
@@ -29,7 +29,9 @@ __all__ = [
     "BeliefStatus",
     "BeliefStore",
     "InMemoryBeliefStore",
+    "MemoryClient",
     "PackedMemory",
+    "RememberResult",
     "ScopeFilter",
     "ScopeIds",
     "ScopeKind",
