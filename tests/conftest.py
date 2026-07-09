@@ -1,9 +1,16 @@
 """Shared pytest fixtures.
 
-We keep fakes (store, embedder, LLM) here as the core grows so every test
-can run without API keys or network.
+Fakes (store, embedder, LLM) live here so tests run without API keys or network.
 """
 
 from __future__ import annotations
 
-# Fixtures will land here in later tasks (InMemoryBeliefStore, FakeEmbedder, …).
+import pytest
+
+from mem01.store.memory_store import InMemoryBeliefStore
+
+
+@pytest.fixture
+def memory_store() -> InMemoryBeliefStore:
+    """Fresh in-memory store per test."""
+    return InMemoryBeliefStore()
