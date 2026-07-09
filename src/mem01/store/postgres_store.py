@@ -117,6 +117,26 @@ class PostgresBeliefStore:
                 )
                 """
             )
+            # Rebuild embeddings if vector size does not match this process
+            cur.execute(
+                """
+                SELECT format_type(a.atttypid, a.atttypmod) AS typ
+                FROM pg_attribute a
+                JOIN pg_class c ON a.attrelid = c.oid
+                JOIN pg_namespace n ON c.relnamespace = n.oid
+                WHERE c.relname = 'embeddings'
+                  AND n.nspname = 'public'
+                  AND a.attname = 'embedding'
+                  AND NOT a.attisdropped
+                """
+            )
+            typ_row = cur.fetchone()
+            expected = f"vector({dim})"
+            if typ_row and typ_row.get("typ"):
+                actual = str(typ_row["typ"]).replace(" ", "")
+                if actual != expected:
+                    cur.execute("DROP TABLE embeddings CASCADE")
+
             cur.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS embeddings (
