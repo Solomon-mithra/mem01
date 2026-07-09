@@ -19,15 +19,30 @@ import json
 import sys
 from pathlib import Path
 
-# Allow running without install: python examples/basic_usage.py
+# Allow finding the package from src/ when not installed; deps still need a venv.
 _ROOT = Path(__file__).resolve().parents[1]
 _SRC = _ROOT / "src"
 if _SRC.is_dir() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from mem01 import InMemoryBeliefStore, MemoryClient, SqliteBeliefStore
-from mem01.embeddings.fake import FakeEmbedder
-from mem01.llm.fake import FakeLLM
+try:
+    from mem01 import InMemoryBeliefStore, MemoryClient, SqliteBeliefStore
+    from mem01.embeddings.fake import FakeEmbedder
+    from mem01.llm.fake import FakeLLM
+except ModuleNotFoundError as exc:
+    missing = getattr(exc, "name", None) or str(exc)
+    print(
+        "Missing dependency while importing mem01 "
+        f"({missing}).\n\n"
+        "Use the project virtualenv (macOS system python3 has no pydantic):\n\n"
+        "  cd mem01\n"
+        "  python3 -m venv .venv\n"
+        "  source .venv/bin/activate\n"
+        "  pip install -e \".[dev]\"\n"
+        "  python3 examples/basic_usage.py\n",
+        file=sys.stderr,
+    )
+    raise SystemExit(1) from exc
 
 
 def _scripted_client(db: str | None) -> MemoryClient:
