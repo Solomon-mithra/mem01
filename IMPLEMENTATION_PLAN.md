@@ -277,7 +277,7 @@ similarity_search(vector, scope_filter, k, statuses={active}) -> list[ScoredBeli
 **Why:** Real durability for demos and local use without Docker. Postgres+pgvector can replace this later behind the same protocol.
 
 **You should know:**
-- **Why SQLite for v1:** Zero ops cost, file-backed, good enough for single-user and early multi-session demos. Matches “local dogfood” and low latency.
+- **Why SQLite for v1:** Zero ops cost, file-backed, good enough for single-user and early multi-session demos. Matches local real use and low latency.
 - **Embeddings in SQLite:** Store as JSON blob or binary; compute cosine in Python for small N. When N is huge, swap to pgvector — **same interface**.
 
 **Files:**
@@ -746,7 +746,7 @@ Plan saved to: **`mem01/IMPLEMENTATION_PLAN.md`**
 1. **Walkthrough mode (recommended for you)** — We do one task at a time in this session. Before each task I explain *what/why*, then we write code/tests. You see the system grow.
 2. **Faster agent mode** — Subagents execute tasks; I still summarize what was built and why after each phase.
 
-**Suggested first milestone:** Tasks **0 → 11** (core product + conflict suite). HTTP/MCP after you can dogfood the client.
+**Suggested first milestone:** Tasks **0 → 11** (core product + conflict suite). HTTP/MCP after you can try the client for real.
 
 ---
 

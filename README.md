@@ -45,7 +45,7 @@ packed = client.recall("language preference", user_id="u1", max_memory_tokens=80
 print(packed.text, packed.tokens_used, packed.latency_ms)
 ```
 
-Real dogfood (later wiring): same client with OpenAI LLM + OpenAI embeddings (~$5 is fine).
+Real use (later wiring): same client with OpenAI LLM + OpenAI embeddings (~$5 is fine).
 
 ## Design in one paragraph
 

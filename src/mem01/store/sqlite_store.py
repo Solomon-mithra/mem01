@@ -1,7 +1,7 @@
 """SQLite BeliefStore — durable local persistence, zero infra.
 
 Why SQLite for v1:
-- File-backed dogfooding without Docker/Postgres
+- File-backed local use without Docker/Postgres
 - Same BeliefStore protocol as InMemoryBeliefStore
 - Embeddings stored as JSON arrays; cosine in Python is fine for small/medium N
   (swap to pgvector later without changing apply_ops / recall)

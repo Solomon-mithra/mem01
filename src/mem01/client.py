@@ -43,7 +43,7 @@ class MemoryClient:
     """High-level memory API.
 
     Defaults match product direction: inject real OpenAI (or other) LLM/embedder
-    when dogfooding; tests pass Fake* implementations.
+    for real use; tests can pass scripted/fake implementations.
     """
 
     store: BeliefStore
