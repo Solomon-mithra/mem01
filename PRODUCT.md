@@ -1,8 +1,9 @@
 # mem01 — Product Design
 
 **One-stop product brief.**  
-Status: design locked from discussion (2026-07-08) · Implementation: not started  
-Positioning: a general agent memory layer that is a **better product than mem0**, under hard **cost / tokens / latency** constraints.
+Status: design locked (2026-07-08) · Core engine in progress · Prod store: Postgres+pgvector  
+Positioning: a general agent memory layer that is a **better product than mem0**, under hard **cost / tokens / latency** constraints.  
+Deploy shape (v1): **self-hosted** on the customer’s server (not multi-tenant SaaS yet).
 
 ---
 
@@ -39,9 +40,9 @@ It does what mem0 does — extract durable information, store it, retrieve it ac
 
 - Beating every public benchmark as the primary success metric
 - Full temporal knowledge graph (Zep / Graphiti territory) as the core path
-- Multi-tenant org / enterprise platform first
+- Multi-tenant SaaS platform first (customers run mem01 on *their* server; SaaS multi-tenant comes later)
 - Agent self-edit as the default write path (extra LLM round-trips)
-- Local-only as the sole story (local mode can come later)
+- SQLite as the production store (SQLite = dev; prod = Postgres+pgvector / Neon)
 
 ### Success bar vs mem0
 
@@ -286,10 +287,10 @@ Development time is not the bottleneck; order is about risk and product focus.
 
 These do not change the product thesis; they are implementation choices:
 
-- [ ] Primary store (e.g. Postgres + pgvector vs other)
+- [x] Primary store: **Postgres + pgvector** (prod / Neon); SQLite + in-memory for dev/tests
 - [ ] Extraction model routing (cheap model vs strong model for writes)
 - [ ] Exact ranking formula for the packer
-- [ ] Multi-tenant / auth model if hosted
+- [ ] Multi-tenant / auth model **only if** we productize SaaS later
 - [ ] Name/branding beyond working title **mem01**
 - [ ] First vertical demo (general chat vs coding-agent shared memory)
 

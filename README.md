@@ -26,7 +26,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-## API key (`.env`)
+## API key + database (`.env`)
 
 ```bash
 cp .env.example .env
@@ -37,6 +37,32 @@ cp .env.example .env
 |------|---------|
 | `mem01/.env` | **Your secrets** (gitignored) |
 | `mem01/.env.example` | Template only — safe to commit |
+
+### Store backends
+
+| Backend | When |
+|---------|------|
+| **SQLite** (default if no URL) | Local dev |
+| **Postgres + pgvector** | Production self-hosted (and **Neon**) |
+
+```bash
+# Local prod-like DB
+docker compose up -d
+# .env:
+# DATABASE_URL=postgresql://mem01:mem01@localhost:5433/mem01
+pip install -e '.[postgres,dev]'
+```
+
+```python
+from mem01 import MemoryClient, create_belief_store
+from mem01.embeddings.openai_embedder import OpenAIEmbedder
+from mem01.llm.openai_compat import OpenAICompatLLM
+
+store = create_belief_store()  # reads DATABASE_URL → Postgres, else SQLite
+client = MemoryClient(store=store, embedder=OpenAIEmbedder(), llm=OpenAICompatLLM())
+```
+
+Same `DATABASE_URL` works with **Neon** (hosted Postgres + pgvector).
 
 `load_env()` also checks `open-source/.env` and the current working directory.
 

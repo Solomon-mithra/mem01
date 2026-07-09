@@ -30,7 +30,9 @@ class OpenAIEmbedder:
                 load_env()
             except Exception:
                 pass
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY") or ""
+            self.api_key = os.environ.get("OPENAI_API_KEY") or ""
+        else:
+            self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
         # text-embedding-3-small default dim is 1536; optional API matryoshka trim

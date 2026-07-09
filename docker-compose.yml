@@ -1,0 +1,26 @@
+# Local production-like Postgres + pgvector for mem01
+# Usage:
+#   docker compose up -d
+#   export DATABASE_URL=postgresql://mem01:mem01@localhost:5432/mem01
+#   pip install -e '.[postgres,dev]'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      # Host 5433 avoids clashing with a local Postgres on 5432
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: mem01
+      POSTGRES_PASSWORD: mem01
+      POSTGRES_DB: mem01
+    volumes:
+      - mem01_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mem01 -d mem01"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mem01_pgdata:

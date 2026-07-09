@@ -29,6 +29,10 @@ eval = [
   "httpx>=0.27",
   "mem0ai>=0.1",
 ]
+postgres = [
+  "psycopg[binary]>=3.1",
+  "pgvector>=0.3",
+]
 api = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.27",
@@ -37,7 +41,7 @@ mcp = [
   "mcp>=1.0",
 ]
 all = [
-  "mem01[dev,openai,api,mcp]",
+  "mem01[dev,openai,postgres,api,mcp]",
 ]
 
 # Package lives in src/mem01 — hatchling discovers it automatically.
@@ -47,6 +51,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
   "integration: needs real API keys / network",
+  "postgres: needs DATABASE_URL with pgvector",
 ]
 
 [tool.ruff]
