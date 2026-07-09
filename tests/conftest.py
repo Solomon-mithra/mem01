@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from mem01.embeddings.fake import FakeEmbedder
 from mem01.store.memory_store import InMemoryBeliefStore
 
 
@@ -14,3 +15,9 @@ from mem01.store.memory_store import InMemoryBeliefStore
 def memory_store() -> InMemoryBeliefStore:
     """Fresh in-memory store per test."""
     return InMemoryBeliefStore()
+
+
+@pytest.fixture
+def fake_embedder() -> FakeEmbedder:
+    """Deterministic embedder — no network."""
+    return FakeEmbedder(dimensions=16)
