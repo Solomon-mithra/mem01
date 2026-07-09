@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mem01"
+version = "0.1.0"
+description = "Belief-based agent memory: correct under evolution, cheap on recall"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "mem01" }]
+dependencies = [
+  "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+]
+openai = [
+  "openai>=1.0",
+  "httpx>=0.27",
+]
+api = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+]
+mcp = [
+  "mcp>=1.0",
+]
+all = [
+  "mem01[dev,openai,api,mcp]",
+]
+
+# Package lives in src/mem01 — hatchling discovers it automatically.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+  "integration: needs real API keys / network",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
