@@ -13,8 +13,8 @@ Belief-based agent memory: **correct under evolution, cheap on recall**.
 
 ## Status
 
-**Core milestone (Tasks 0–11):** `MemoryClient` + write/read pipelines + product suite.  
-Next: examples, HTTP/MCP, OpenAI-default providers (mem0-style), consolidation.
+**Core + example (Tasks 0–12):** `MemoryClient`, pipelines, product suite, `examples/basic_usage.py`.  
+Next: HTTP/MCP, more providers, consolidation.
 
 ## Setup
 
@@ -26,17 +26,33 @@ pip install -e ".[dev]"
 pytest
 ```
 
+## Try the example
+
+```bash
+# Offline (no API keys) — scripted extract for a full walkthrough
+python examples/basic_usage.py
+
+# Optional SQLite file
+python examples/basic_usage.py --db ./demo.db
+
+# Real OpenAI LLM + embeddings (needs OPENAI_API_KEY; usage-based, not free)
+python examples/basic_usage.py --openai
+
+# Claude extract + OpenAI embeddings
+python examples/basic_usage.py --claude
+```
+
 ## Quick usage (core API)
 
 ```python
 from mem01 import MemoryClient, InMemoryBeliefStore
-from mem01.embeddings.fake import FakeEmbedder  # tests; use OpenAI embedder for real
-from mem01.llm.fake import FakeLLM              # tests; use OpenAI/Claude for real
+from mem01.embeddings.openai_embedder import OpenAIEmbedder
+from mem01.llm.openai_compat import OpenAICompatLLM
 
 client = MemoryClient(
     store=InMemoryBeliefStore(),
-    embedder=FakeEmbedder(),
-    llm=FakeLLM('[{"op":"ADD","content":"User prefers TypeScript"}]'),
+    embedder=OpenAIEmbedder(),      # OPENAI_API_KEY
+    llm=OpenAICompatLLM(),          # same key; or AnthropicLLM for Claude
     default_user_id="u1",
 )
 
@@ -45,7 +61,7 @@ packed = client.recall("language preference", user_id="u1", max_memory_tokens=80
 print(packed.text, packed.tokens_used, packed.latency_ms)
 ```
 
-Real use (later wiring): same client with OpenAI LLM + OpenAI embeddings (~$5 is fine).
+For offline tests, pass scripted LLM/embedder fakes instead of OpenAI.
 
 ## Design in one paragraph
 
