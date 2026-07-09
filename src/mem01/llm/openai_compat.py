@@ -28,6 +28,13 @@ class OpenAICompatLLM:
         model: str = "gpt-4o-mini",
         base_url: str = "https://api.openai.com/v1",
     ) -> None:
+        if api_key is None:
+            try:
+                from mem01.env import load_env
+
+                load_env()
+            except Exception:
+                pass
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY") or ""
         self.model = model
         self.base_url = base_url.rstrip("/")

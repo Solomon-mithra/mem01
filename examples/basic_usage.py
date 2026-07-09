@@ -26,6 +26,9 @@ if _SRC.is_dir() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 try:
+    from mem01.env import load_env
+
+    load_env()
     from mem01 import InMemoryBeliefStore, MemoryClient, SqliteBeliefStore
     from mem01.embeddings.fake import FakeEmbedder
     from mem01.llm.fake import FakeLLM

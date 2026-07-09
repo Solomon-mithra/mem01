@@ -26,20 +26,39 @@ pip install -e ".[dev]"
 pytest
 ```
 
+## API key (`.env`)
+
+```bash
+cp .env.example .env
+# edit .env — set OPENAI_API_KEY=sk-...
+```
+
+| File | Purpose |
+|------|---------|
+| `mem01/.env` | **Your secrets** (gitignored) |
+| `mem01/.env.example` | Template only — safe to commit |
+
+`load_env()` also checks `open-source/.env` and the current working directory.
+
 ## Try the example
 
 ```bash
+# Activate the project venv first (macOS usually has python3, not python)
+source .venv/bin/activate   # after: python3 -m venv .venv && pip install -e ".[dev]"
+
 # Offline (no API keys) — scripted extract for a full walkthrough
-python examples/basic_usage.py
+python3 examples/basic_usage.py
 
 # Optional SQLite file
-python examples/basic_usage.py --db ./demo.db
+python3 examples/basic_usage.py --db ./demo.db
 
 # Real OpenAI LLM + embeddings (needs OPENAI_API_KEY; usage-based, not free)
-python examples/basic_usage.py --openai
+export OPENAI_API_KEY=sk-...
+python3 examples/basic_usage.py --openai
 
 # Claude extract + OpenAI embeddings
-python examples/basic_usage.py --claude
+export ANTHROPIC_API_KEY=... OPENAI_API_KEY=...
+python3 examples/basic_usage.py --claude
 ```
 
 ## Quick usage (core API)

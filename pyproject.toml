@@ -12,6 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "mem01" }]
 dependencies = [
   "pydantic>=2.0",
+  "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +23,11 @@ dev = [
 openai = [
   "openai>=1.0",
   "httpx>=0.27",
+]
+eval = [
+  "openai>=1.0",
+  "httpx>=0.27",
+  "mem0ai>=0.1",
 ]
 api = [
   "fastapi>=0.110",
