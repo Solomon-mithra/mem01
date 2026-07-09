@@ -13,7 +13,8 @@ Belief-based agent memory: **correct under evolution, cheap on recall**.
 
 ## Status
 
-**Phase 0 — scaffolding.** Core engine not shipped yet.
+**Core milestone (Tasks 0–11):** `MemoryClient` + write/read pipelines + product suite.  
+Next: examples, HTTP/MCP, OpenAI-default providers (mem0-style), consolidation.
 
 ## Setup
 
@@ -24,6 +25,27 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ```
+
+## Quick usage (core API)
+
+```python
+from mem01 import MemoryClient, InMemoryBeliefStore
+from mem01.embeddings.fake import FakeEmbedder  # tests; use OpenAI embedder for real
+from mem01.llm.fake import FakeLLM              # tests; use OpenAI/Claude for real
+
+client = MemoryClient(
+    store=InMemoryBeliefStore(),
+    embedder=FakeEmbedder(),
+    llm=FakeLLM('[{"op":"ADD","content":"User prefers TypeScript"}]'),
+    default_user_id="u1",
+)
+
+client.remember([{"role": "user", "content": "I prefer TypeScript"}], user_id="u1")
+packed = client.recall("language preference", user_id="u1", max_memory_tokens=800)
+print(packed.text, packed.tokens_used, packed.latency_ms)
+```
+
+Real dogfood (later wiring): same client with OpenAI LLM + OpenAI embeddings (~$5 is fine).
 
 ## Design in one paragraph
 
