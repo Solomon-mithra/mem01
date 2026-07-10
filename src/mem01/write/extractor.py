@@ -37,6 +37,11 @@ Rules:
 3. Prefer topic_key for recurring topics (location, job, name, preference_*).
 4. If nothing durable, return [].
 5. Output ONLY a JSON array — no markdown fences, no commentary.
+6. Preserve concrete specifics verbatim: names of people, places, organizations,
+   titles of books/films/songs, numbers, and dates. Never replace a specific
+   ("moved from Sweden") with an abstraction ("moved from her home country").
+7. Notable one-time events count as durable facts: trips, purchases, meetings,
+   performances, milestones. Record them with their date when stated or inferable.
 
 Existing active beliefs (may be empty):
 {existing}
