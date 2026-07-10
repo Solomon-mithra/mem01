@@ -48,6 +48,10 @@ Rules:
    their own date. Never SUPERSEDE, UPDATE, or MERGE one dated event with another.
 9. Every event belief must state its absolute date or timeframe in the content
    ("...on 8 May 2023", "...in early June 2023") when the session date is known.
+10. Capture the specific details people share about their experiences, possessions,
+   and creations: what an object or gift means to them, what a sign or artwork said
+   or depicted, exact titles, years, durations, and counts. Prefer several small
+   precise beliefs over one broad summary belief.
 
 Existing active beliefs (may be empty):
 {existing}
