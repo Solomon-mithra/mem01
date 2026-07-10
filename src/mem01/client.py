@@ -119,8 +119,14 @@ class MemoryClient:
         agent_id: str | None = None,
         max_memory_tokens: int = 800,
         k: int = 20,
+        include_history: bool = False,
     ) -> PackedMemory:
-        """Hot-path retrieve — 0 LLM calls."""
+        """Hot-path retrieve — 0 LLM calls.
+
+        Default: active beliefs only (current truth).
+        include_history=True: also return superseded/invalidated, labeled in text
+        (use for “before SF?” / medical audit style questions).
+        """
         scope_ids = self._scope_ids(
             user_id,
             project_id=project_id,
@@ -134,7 +140,39 @@ class MemoryClient:
             scope_ids,
             max_memory_tokens=max_memory_tokens,
             k=k,
+            include_history=include_history,
         )
+
+    def history(
+        self,
+        *,
+        user_id: str | None = None,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        agent_id: str | None = None,
+        include_invalidated: bool = True,
+        limit: int = 100,
+    ) -> list[Belief]:
+        """Chronological belief timeline for a scope (audit / “let me see”).
+
+        Includes active + superseded (+ invalidated by default). Newest first.
+        Does not call an LLM or run vector search.
+        """
+        scope_ids = self._scope_ids(
+            user_id,
+            project_id=project_id,
+            session_id=session_id,
+            agent_id=agent_id,
+        )
+        statuses = {
+            BeliefStatus.ACTIVE,
+            BeliefStatus.SUPERSEDED,
+        }
+        if include_invalidated:
+            statuses.add(BeliefStatus.INVALIDATED)
+        beliefs = self.store.list_by_scope(scope_ids, statuses=statuses)
+        beliefs.sort(key=lambda b: b.updated_at, reverse=True)
+        return beliefs[: max(1, limit)]
 
     def correct(
         self,

@@ -41,6 +41,15 @@ def test_drops_non_active():
     assert out[0].belief.content == "live in SF"
 
 
+def test_history_mode_keeps_superseded():
+    active = _scored("live in SF", status=BeliefStatus.ACTIVE, score=0.9)
+    old = _scored("live in NY", status=BeliefStatus.SUPERSEDED, score=0.95)
+    out = filter_conflicts([old, active], mode="history")
+    assert len(out) == 2
+    contents = {c.belief.content for c in out}
+    assert contents == {"live in SF", "live in NY"}
+
+
 def test_drops_expired_valid_to():
     now = utc_now()
     expired = _scored(

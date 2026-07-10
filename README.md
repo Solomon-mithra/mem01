@@ -102,7 +102,8 @@ docker compose down
 |--------|------|-------------|
 | `GET` | `/health` | Process liveness |
 | `POST` | `/v1/remember` | Ingest messages; extract and apply belief operations |
-| `POST` | `/v1/recall` | Retrieve a budgeted memory block for a query |
+| `POST` | `/v1/recall` | Retrieve a budgeted memory block for a query (`include_history` optional) |
+| `POST` | `/v1/history` | Full belief timeline (active + superseded + invalidated) |
 | `POST` | `/v1/correct` | Supersede a belief by id with a corrected value |
 | `POST` | `/v1/forget` | Invalidate a belief by id |
 
@@ -128,9 +129,25 @@ docker compose down
   "user_id": "user_1",
   "query": "Where does the user live?",
   "max_memory_tokens": 800,
-  "k": 20
+  "k": 20,
+  "include_history": false
 }
 ```
+
+- Default (`include_history: false`): **active only** — single current truth for the agent.
+- `include_history: true`: also returns superseded/invalidated, labeled as `[active]` / `[superseded]` so temporal questions (“before SF?”) work without polluting every turn.
+
+**`POST /v1/history`**
+
+```json
+{
+  "user_id": "user_1",
+  "include_invalidated": true,
+  "limit": 100
+}
+```
+
+Chronological audit timeline (no vector search). Use for admin UI, medical-style charts, or “show me what changed.”
 
 **`POST /v1/correct`**
 

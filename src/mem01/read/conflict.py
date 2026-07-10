@@ -5,26 +5,44 @@ Why this exists (product wedge):
 - Default recall must not inject two opposite truths when we can detect them
 - Deterministic rules only — keeps hot path cheap (mem0-class latency/$)
 
-v1 rules:
+v1 rules (mode=current):
 1. Drop non-active statuses
 2. Drop outside validity window (valid_from / valid_to)
 3. If multiple candidates share metadata topic_key, keep best (score, then confidence, then newer)
+
+mode=history (audit / temporal questions):
+- Keep active + superseded (+ optional invalidated)
+- Do NOT collapse topic_key to one winner — both SF (active) and NY (superseded) surface
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from mem01.types import BeliefStatus, ScoredBelief, utc_now
+
+HistoryMode = Literal["current", "history"]
+
+_HISTORY_STATUSES = frozenset(
+    {
+        BeliefStatus.ACTIVE,
+        BeliefStatus.SUPERSEDED,
+        BeliefStatus.INVALIDATED,
+    }
+)
 
 
 def filter_conflicts(
     candidates: list[ScoredBelief],
     *,
     at: datetime | None = None,
+    mode: HistoryMode = "current",
 ) -> list[ScoredBelief]:
-    """Return a conflict-safe subset of *candidates* (order preserved among survivors)."""
+    """Return a filtered subset of *candidates* (order preserved among survivors)."""
     when = at or utc_now()
+    if mode == "history":
+        return [c for c in candidates if c.belief.status in _HISTORY_STATUSES]
     current = [c for c in candidates if _is_eligible(c, when)]
     return _dedupe_by_topic_key(current)
 

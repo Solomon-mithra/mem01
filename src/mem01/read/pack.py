@@ -8,11 +8,17 @@ Why first-class budgets:
 from __future__ import annotations
 
 from mem01.tokens import estimate_tokens
-from mem01.types import Belief, PackedMemory, ScoredBelief
+from mem01.types import Belief, BeliefStatus, PackedMemory, ScoredBelief
 
 
-def format_belief_line(belief: Belief) -> str:
-    """One line injected into the agent prompt for a belief."""
+def format_belief_line(belief: Belief, *, show_status: bool = False) -> str:
+    """One line injected into the agent prompt for a belief.
+
+    History mode tags status so the agent can tell current vs past facts apart
+    (e.g. medical audit: superseded allergy still visible, clearly labeled).
+    """
+    if show_status or belief.status != BeliefStatus.ACTIVE:
+        return f"- [{belief.status.value}] {belief.content}"
     return f"- {belief.content}"
 
 
@@ -21,6 +27,7 @@ def pack_beliefs(
     *,
     max_memory_tokens: int = 800,
     candidate_count: int | None = None,
+    show_status: bool = False,
 ) -> PackedMemory:
     """Greedy pack highest-score candidates until the token budget is hit.
 
@@ -42,7 +49,7 @@ def pack_beliefs(
     tokens_used = 0
 
     for c in ordered:
-        line = format_belief_line(c.belief)
+        line = format_belief_line(c.belief, show_status=show_status)
         # +1 for newline between lines
         extra = estimate_tokens(line if not lines else "\n" + line)
         if tokens_used + extra > max_memory_tokens:

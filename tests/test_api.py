@@ -51,3 +51,28 @@ def test_remember_recall_roundtrip(client):
     )
     assert r2.status_code == 200
     assert "text" in r2.json()
+
+
+def test_history_endpoint(client):
+    r = client.post(
+        "/v1/history",
+        json={"user_id": "u_hist", "limit": 10},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "beliefs" in body
+    assert body["count"] == len(body["beliefs"])
+
+
+def test_recall_accepts_include_history(client):
+    r = client.post(
+        "/v1/recall",
+        json={
+            "user_id": "u1",
+            "query": "where before",
+            "include_history": True,
+            "max_memory_tokens": 100,
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["include_history"] is True

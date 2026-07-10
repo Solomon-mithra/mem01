@@ -33,6 +33,17 @@ class RecallBody(BaseModel):
     agent_id: str | None = None
     max_memory_tokens: int = Field(default=800, ge=0)
     k: int = Field(default=20, ge=1, le=200)
+    # False = current truth only; True = include superseded/invalidated (labeled)
+    include_history: bool = False
+
+
+class HistoryBody(BaseModel):
+    user_id: str
+    project_id: str | None = None
+    session_id: str | None = None
+    agent_id: str | None = None
+    include_invalidated: bool = True
+    limit: int = Field(default=100, ge=1, le=500)
 
 
 class CorrectBody(BaseModel):
@@ -128,6 +139,7 @@ def recall(body: RecallBody) -> dict[str, Any]:
             agent_id=body.agent_id,
             max_memory_tokens=body.max_memory_tokens,
             k=body.k,
+            include_history=body.include_history,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -137,9 +149,52 @@ def recall(body: RecallBody) -> dict[str, Any]:
         "max_memory_tokens": packed.max_memory_tokens,
         "candidate_count": packed.candidate_count,
         "latency_ms": packed.latency_ms,
+        "include_history": body.include_history,
         "beliefs": [
-            {"id": b.id, "content": b.content, "status": b.status.value}
+            {
+                "id": b.id,
+                "content": b.content,
+                "status": b.status.value,
+                "supersedes_id": b.supersedes_id,
+                "valid_from": b.valid_from.isoformat() if b.valid_from else None,
+                "valid_to": b.valid_to.isoformat() if b.valid_to else None,
+            }
             for b in packed.beliefs
+        ],
+    }
+
+
+@app.post("/v1/history")
+def history(body: HistoryBody) -> dict[str, Any]:
+    """Full belief timeline for a scope — audit / “let me see previous facts”."""
+    client: MemoryClient = app.state.client
+    try:
+        beliefs = client.history(
+            user_id=body.user_id,
+            project_id=body.project_id,
+            session_id=body.session_id,
+            agent_id=body.agent_id,
+            include_invalidated=body.include_invalidated,
+            limit=body.limit,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {
+        "count": len(beliefs),
+        "beliefs": [
+            {
+                "id": b.id,
+                "content": b.content,
+                "status": b.status.value,
+                "confidence": b.confidence,
+                "supersedes_id": b.supersedes_id,
+                "source": b.source.value,
+                "valid_from": b.valid_from.isoformat() if b.valid_from else None,
+                "valid_to": b.valid_to.isoformat() if b.valid_to else None,
+                "created_at": b.created_at.isoformat(),
+                "updated_at": b.updated_at.isoformat(),
+            }
+            for b in beliefs
         ],
     }
 
