@@ -37,6 +37,21 @@ Rules:
 3. Prefer topic_key for recurring topics (location, job, name, preference_*).
 4. If nothing durable, return [].
 5. Output ONLY a JSON array — no markdown fences, no commentary.
+6. Preserve concrete specifics verbatim: names of people, places, organizations,
+   titles of books/films/songs, numbers, and dates. Never replace a specific
+   ("moved from Sweden") with an abstraction ("moved from her home country").
+7. Notable one-time events count as durable facts: trips, purchases, meetings,
+   performances, milestones. Record them with their date when stated or inferable.
+8. SUPERSEDE is only for CURRENT-STATE facts that changed (moved cities, new job,
+   preference flip). Repeated activities are distinct episodes, NOT updates: a second
+   camping trip, another painting, another beach visit each get their own ADD with
+   their own date. Never SUPERSEDE, UPDATE, or MERGE one dated event with another.
+9. Every event belief must state its absolute date or timeframe in the content
+   ("...on 8 May 2023", "...in early June 2023") when the session date is known.
+10. Capture the specific details people share about their experiences, possessions,
+   and creations: what an object or gift means to them, what a sign or artwork said
+   or depicted, exact titles, years, durations, and counts. Prefer several small
+   precise beliefs over one broad summary belief.
 
 Existing active beliefs (may be empty):
 {existing}
@@ -119,8 +134,27 @@ def extract_ops(
     raw = llm.complete(chat, temperature=temperature)
     try:
         items = _parse_ops_json(raw)
-    except (json.JSONDecodeError, ValueError) as e:
-        raise ValueError(f"failed to parse extractor JSON: {e}\nraw={raw!r}") from e
+    except (json.JSONDecodeError, ValueError):
+        # One retry: LLMs occasionally emit malformed JSON (e.g. "key=value"
+        # instead of "key":"value"); a corrective resample usually fixes it.
+        retry_chat = chat + [
+            ChatMessage(role="assistant", content=raw),
+            ChatMessage(
+                role="user",
+                content=(
+                    "That output was not valid JSON. Re-emit the belief operations "
+                    "as a valid JSON array only — every key and value quoted and "
+                    "separated by a colon, no markdown fences, no commentary."
+                ),
+            ),
+        ]
+        raw = llm.complete(retry_chat, temperature=temperature)
+        try:
+            items = _parse_ops_json(raw)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(
+                f"failed to parse extractor JSON after retry: {e}\nraw={raw!r}"
+            ) from e
 
     ops: list[BeliefOp] = []
     for item in items:

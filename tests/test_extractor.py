@@ -117,6 +117,40 @@ def test_extract_drops_invalid_ops_keeps_valid():
     assert all(o.op == BeliefOpType.ADD for o in ops)
 
 
+# Real malformed output observed from gpt-4o-mini during a LoCoMo benchmark run:
+# `=` instead of `:` inside an object key ("topic_key=self_identity").
+MALFORMED = '[{"op":"ADD","content":"Caroline went biking","confidence":0.9,"topic_key=self_identity"}]'
+
+
+def test_extract_retries_once_on_malformed_json():
+    good = [{"op": "ADD", "content": "Caroline went biking", "topic_key": "activity"}]
+    llm = FakeLLM([MALFORMED, json.dumps(good)])
+    ops = extract_ops(
+        [{"role": "user", "content": "Caroline: I went biking last weekend!"}],
+        llm=llm,
+        scope_ids=ScopeIds(user_id="u1"),
+    )
+    assert len(ops) == 1
+    assert ops[0].content == "Caroline went biking"
+    assert llm.call_count == 2
+    # Retry call carries the bad output back plus a corrective instruction
+    retry_msgs = llm.calls[1]
+    assert retry_msgs[-2].role == "assistant"
+    assert retry_msgs[-2].content == MALFORMED
+    assert "not valid JSON" in retry_msgs[-1].content
+
+
+def test_extract_raises_when_retry_also_malformed():
+    llm = FakeLLM([MALFORMED, MALFORMED])
+    with pytest.raises(ValueError, match="after retry"):
+        extract_ops(
+            [{"role": "user", "content": "Caroline: I went biking last weekend!"}],
+            llm=llm,
+            scope_ids=ScopeIds(user_id="u1"),
+        )
+    assert llm.call_count == 2
+
+
 def test_extract_requires_conversation():
     llm = FakeLLM("[]")
     with pytest.raises(ValueError, match="at least one"):
