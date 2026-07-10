@@ -119,8 +119,27 @@ def extract_ops(
     raw = llm.complete(chat, temperature=temperature)
     try:
         items = _parse_ops_json(raw)
-    except (json.JSONDecodeError, ValueError) as e:
-        raise ValueError(f"failed to parse extractor JSON: {e}\nraw={raw!r}") from e
+    except (json.JSONDecodeError, ValueError):
+        # One retry: LLMs occasionally emit malformed JSON (e.g. "key=value"
+        # instead of "key":"value"); a corrective resample usually fixes it.
+        retry_chat = chat + [
+            ChatMessage(role="assistant", content=raw),
+            ChatMessage(
+                role="user",
+                content=(
+                    "That output was not valid JSON. Re-emit the belief operations "
+                    "as a valid JSON array only — every key and value quoted and "
+                    "separated by a colon, no markdown fences, no commentary."
+                ),
+            ),
+        ]
+        raw = llm.complete(retry_chat, temperature=temperature)
+        try:
+            items = _parse_ops_json(raw)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(
+                f"failed to parse extractor JSON after retry: {e}\nraw={raw!r}"
+            ) from e
 
     ops: list[BeliefOp] = []
     for item in items:
