@@ -56,3 +56,45 @@ def rank_candidates(
         ranked.append(ScoredBelief(belief=c.belief, score=s))
     ranked.sort(key=lambda x: x.score, reverse=True)
     return ranked
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def mmr_select(
+    ranked: list[ScoredBelief],
+    *,
+    lambda_weight: float = 0.75,
+) -> list[ScoredBelief]:
+    """Greedy maximal-marginal-relevance reorder to reduce near-duplicate picks.
+
+    Multi-hop and listing questions need *different* beliefs packed together;
+    pure score ordering lets one topic cluster crowd out the rest of the
+    budget. Uses token Jaccard between belief contents so it works with any
+    store and never touches embeddings on the hot path. O(n^2), n <= recall k.
+    """
+    if len(ranked) <= 2:
+        return list(ranked)
+
+    from mem01.read.search import tokenize
+
+    tokens = {c.belief.id: set(tokenize(c.belief.content)) for c in ranked}
+    remaining = list(ranked)
+    selected: list[ScoredBelief] = [remaining.pop(0)]
+    while remaining:
+        best_idx = 0
+        best_val = float("-inf")
+        for i, cand in enumerate(remaining):
+            redundancy = max(
+                _jaccard(tokens[cand.belief.id], tokens[s.belief.id])
+                for s in selected
+            )
+            val = lambda_weight * cand.score - (1.0 - lambda_weight) * redundancy
+            if val > best_val:
+                best_val = val
+                best_idx = i
+        selected.append(remaining.pop(best_idx))
+    return selected

@@ -9,8 +9,8 @@ from mem01.embeddings.base import Embedder
 from mem01.metrics import timer
 from mem01.read.conflict import HistoryMode, filter_conflicts
 from mem01.read.pack import pack_beliefs
-from mem01.read.rank import rank_candidates
-from mem01.read.search import search_beliefs
+from mem01.read.rank import mmr_select, rank_candidates
+from mem01.read.search import fuse_candidates, lexical_search_beliefs, search_beliefs
 from mem01.store.base import BeliefStore, ScopeFilter
 from mem01.types import BeliefStatus, PackedMemory
 
@@ -31,6 +31,7 @@ def recall(
     k: int = 20,
     statuses: set[BeliefStatus] | None = None,
     include_history: bool = False,
+    multi_signal: bool = True,
 ) -> PackedMemory:
     """Retrieve a budgeted, conflict-safe memory block for *query*.
 
@@ -40,6 +41,10 @@ def recall(
     *include_history*: also search superseded/invalidated beliefs and label them
     in the packed text (for temporal questions / audit). Default False so the
     agent prompt stays single-truth for “what is true now?”.
+
+    *multi_signal*: fuse vector search with a lexical/entity pass (RRF) and
+    apply MMR diversity before packing. Still zero LLM calls; pass False for
+    pure-vector retrieval.
     """
     mode: HistoryMode = "history" if include_history else "current"
     if statuses is None and include_history:
@@ -54,9 +59,20 @@ def recall(
             k=k,
             statuses=statuses,
         )
+        if multi_signal:
+            lexical = lexical_search_beliefs(
+                store,
+                query,
+                scope_filter,
+                k=k,
+                statuses=statuses,
+            )
+            candidates = fuse_candidates(candidates, lexical, k=k)
         candidate_count = len(candidates)
         safe = filter_conflicts(candidates, mode=mode)
         ranked = rank_candidates(safe)
+        if multi_signal:
+            ranked = mmr_select(ranked)
         packed = pack_beliefs(
             ranked,
             max_memory_tokens=max_memory_tokens,
