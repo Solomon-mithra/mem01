@@ -42,6 +42,12 @@ Rules:
    ("moved from Sweden") with an abstraction ("moved from her home country").
 7. Notable one-time events count as durable facts: trips, purchases, meetings,
    performances, milestones. Record them with their date when stated or inferable.
+8. SUPERSEDE is only for CURRENT-STATE facts that changed (moved cities, new job,
+   preference flip). Repeated activities are distinct episodes, NOT updates: a second
+   camping trip, another painting, another beach visit each get their own ADD with
+   their own date. Never SUPERSEDE, UPDATE, or MERGE one dated event with another.
+9. Every event belief must state its absolute date or timeframe in the content
+   ("...on 8 May 2023", "...in early June 2023") when the session date is known.
 
 Existing active beliefs (may be empty):
 {existing}
