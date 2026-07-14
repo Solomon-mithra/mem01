@@ -17,7 +17,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from mem01.llm.base import ChatMessage, LLMClient
-from mem01.types import Belief, BeliefOp, BeliefOpType, ScopeIds, ScopeKind
+from mem01.types import Belief, BeliefOp, ScopeIds, ScopeKind
 
 EXTRACTOR_SYSTEM_PROMPT = """You are the write-side memory extractor for mem01.
 Convert new conversation into a JSON array of belief operations.
@@ -105,9 +105,7 @@ def extract_ops(
     chat: list[ChatMessage] = [
         ChatMessage(
             role="system",
-            content=EXTRACTOR_SYSTEM_PROMPT.format(
-                existing=_format_existing(existing_beliefs)
-            ),
+            content=EXTRACTOR_SYSTEM_PROMPT.format(existing=_format_existing(existing_beliefs)),
         )
     ]
     for m in messages:
@@ -152,24 +150,16 @@ def extract_ops(
         try:
             items = _parse_ops_json(raw)
         except (json.JSONDecodeError, ValueError) as e:
-            raise ValueError(
-                f"failed to parse extractor JSON after retry: {e}\nraw={raw!r}"
-            ) from e
+            raise ValueError(f"failed to parse extractor JSON after retry: {e}\nraw={raw!r}") from e
 
     ops: list[BeliefOp] = []
     for item in items:
         if not isinstance(item, dict):
             continue
-        # Inject default scope if model omitted it
+        # Scope is caller authority, never model-controlled output.
         payload = dict(item)
-        payload.setdefault("scope", scope.value)
-        if "scope_ids" not in payload:
-            payload["scope_ids"] = scope_ids.model_dump()
-        else:
-            # merge defaults under model-provided ids
-            merged = scope_ids.model_dump()
-            merged.update({k: v for k, v in payload["scope_ids"].items() if v is not None})
-            payload["scope_ids"] = merged
+        payload["scope"] = scope.value
+        payload["scope_ids"] = scope_ids.model_dump()
         # Normalize op string
         if "op" in payload and isinstance(payload["op"], str):
             payload["op"] = payload["op"].upper()

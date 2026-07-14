@@ -3,17 +3,17 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mem01"
+name = "mem01-engine"
 version = "0.1.0"
 description = "Belief-based agent memory: correct under evolution, cheap on recall"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [{ name = "mem01" }]
 dependencies = [
   "pydantic>=2.0",
   "python-dotenv>=1.0",
-  "psycopg[binary]>=3.1",
+  "psycopg[binary,pool]>=3.1",
   "pgvector>=0.3",
   "fastapi>=0.110",
   "uvicorn[standard]>=0.27",
@@ -38,10 +38,12 @@ mcp = [
   "mcp>=1.0",
 ]
 all = [
-  "mem01[dev,openai,mcp]",
+  "mem01-engine[dev,openai,mcp]",
 ]
 
-# Package lives in src/mem01 — hatchling discovers it automatically.
+# Distribution name is mem01-engine; import package remains mem01.
+[tool.hatch.build.targets.wheel]
+packages = ["src/mem01"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

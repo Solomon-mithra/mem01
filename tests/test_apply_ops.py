@@ -7,7 +7,6 @@ import pytest
 from mem01.embeddings.fake import FakeEmbedder
 from mem01.store.memory_store import InMemoryBeliefStore
 from mem01.types import (
-    Belief,
     BeliefOp,
     BeliefOpType,
     BeliefStatus,
@@ -54,6 +53,25 @@ def test_add_creates_active_belief_with_embedding(store, embedder):
     assert store.get_embedding(bid) is not None
     active = store.list_by_scope(_scope())
     assert len(active) == 1
+
+
+def test_add_rejects_cross_user_output_scope(store, embedder):
+    result = apply_ops(
+        store,
+        [
+            BeliefOp(
+                op=BeliefOpType.ADD,
+                content="cross-tenant fact",
+                scope_ids=_scope("victim"),
+            )
+        ],
+        embedder,
+        expected_user_id="attacker",
+    )
+
+    assert result.errors == ["ADD: permission denied"]
+    assert result.created_ids == []
+    assert store.list_by_scope(_scope("victim")) == []
 
 
 def test_supersede_deactivates_old_activates_new(store, embedder):
@@ -179,7 +197,11 @@ def test_merge_collapses_duplicates(store, embedder):
     )
     b = apply_ops(
         store,
-        [BeliefOp(op=BeliefOpType.ADD, content="User is based in San Francisco", scope_ids=_scope())],
+        [
+            BeliefOp(
+                op=BeliefOpType.ADD, content="User is based in San Francisco", scope_ids=_scope()
+            )
+        ],
         embedder,
     )
     id_a, id_b = a.created_ids[0], b.created_ids[0]
@@ -204,6 +226,39 @@ def test_merge_collapses_duplicates(store, embedder):
     assert set(active[0].metadata.get("merged_from", [])) == {id_a, id_b}
     assert store.get(id_a).status == BeliefStatus.SUPERSEDED
     assert store.get(id_b).status == BeliefStatus.SUPERSEDED
+
+
+def test_merge_rejects_cross_user_output_scope_without_mutating_inputs(store, embedder):
+    first = apply_ops(
+        store,
+        [BeliefOp(op=BeliefOpType.ADD, content="fact A", scope_ids=_scope("attacker"))],
+        embedder,
+    ).created_ids[0]
+    second = apply_ops(
+        store,
+        [BeliefOp(op=BeliefOpType.ADD, content="fact B", scope_ids=_scope("attacker"))],
+        embedder,
+    ).created_ids[0]
+
+    result = apply_ops(
+        store,
+        [
+            BeliefOp(
+                op=BeliefOpType.MERGE,
+                target_ids=[first, second],
+                content="cross-tenant canonical",
+                scope_ids=_scope("victim"),
+            )
+        ],
+        embedder,
+        expected_user_id="attacker",
+    )
+
+    assert result.ok is False
+    assert result.created_ids == []
+    assert store.get(first).status == BeliefStatus.ACTIVE
+    assert store.get(second).status == BeliefStatus.ACTIVE
+    assert store.list_by_scope(_scope("victim")) == []
 
 
 def test_supersede_missing_target_records_error(store, embedder):
@@ -238,3 +293,23 @@ def test_batch_continues_after_one_error(store, embedder):
     assert result.errors
     assert len(result.created_ids) == 1
     assert store.list_by_scope(_scope())[0].content == "still added"
+
+
+def test_operational_exception_is_categorized_without_secret(store, embedder):
+    secret = "postgresql://private:password@secret.example/mem01"
+
+    def fail_upsert(belief):
+        raise RuntimeError(secret)
+
+    store.upsert = fail_upsert
+
+    result = apply_ops(
+        store,
+        [BeliefOp(op=BeliefOpType.ADD, content="safe", scope_ids=_scope())],
+        embedder,
+        expected_user_id="u1",
+    )
+
+    assert result.ok is False
+    assert result.errors == ["ADD: operation failed"]
+    assert secret not in repr(result)

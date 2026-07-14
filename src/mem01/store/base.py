@@ -25,6 +25,10 @@ class BeliefStore(Protocol):
         """Return belief by id, or None if missing."""
         ...
 
+    def delete_by_user(self, user_id: str) -> int:
+        """Hard-delete all beliefs for a non-empty user id and return the count."""
+        ...
+
     def upsert(self, belief: Belief) -> None:
         """Insert or replace a belief row (does not touch embeddings)."""
         ...
@@ -37,6 +41,29 @@ class BeliefStore(Protocol):
         valid_to: datetime | None = None,
     ) -> Belief | None:
         """Update status (and optional valid_to). Returns updated belief or None."""
+        ...
+
+    def supersede_if_owned(
+        self,
+        target_id: str,
+        replacement: Belief,
+        replacement_embedding: list[float],
+        *,
+        expected_user_id: str,
+        superseded_at: datetime,
+    ) -> bool:
+        """Atomically replace an active target only when its user owns it."""
+        ...
+
+    def invalidate_if_owned(
+        self,
+        belief_id: str,
+        *,
+        expected_user_id: str,
+        reason: str | None,
+        invalidated_at: datetime,
+    ) -> bool:
+        """Atomically invalidate an active target only when its user owns it."""
         ...
 
     def list_by_scope(

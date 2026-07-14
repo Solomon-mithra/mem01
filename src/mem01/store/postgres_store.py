@@ -27,15 +27,15 @@ from mem01.types import (
 
 def _require_psycopg():
     try:
-        import psycopg
-        from psycopg.rows import dict_row
         from pgvector.psycopg import register_vector
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
     except ImportError as e:
         raise ImportError(
             "Postgres store requires: pip install 'mem01[postgres]' "
-            "(psycopg[binary] + pgvector)"
+            "(psycopg[binary,pool] + pgvector)"
         ) from e
-    return psycopg, dict_row, register_vector
+    return ConnectionPool, dict_row, register_vector
 
 
 def _row_to_belief(row: dict[str, Any]) -> Belief:
@@ -80,100 +80,113 @@ class PostgresBeliefStore:
             raise ValueError("embedding_dim must be >= 1")
         self.dsn = dsn
         self.embedding_dim = embedding_dim
-        psycopg, dict_row, register_vector = _require_psycopg()
-        self._psycopg = psycopg
-        self._dict_row = dict_row
+        ConnectionPool, dict_row, register_vector = _require_psycopg()
         self._register_vector = register_vector
-        self._conn = psycopg.connect(dsn, row_factory=dict_row, autocommit=False)
-        # Extension must exist before register_vector looks up the type OID
-        with self._conn.cursor() as cur:
+        self._closed = False
+        self._pool = ConnectionPool(
+            dsn,
+            kwargs={"row_factory": dict_row, "autocommit": False},
+            configure=self._configure_connection,
+            open=True,
+        )
+        try:
+            self._migrate()
+        except Exception:
+            self.close()
+            raise
+
+    def _configure_connection(self, connection: Any) -> None:
+        # The extension must exist before register_vector looks up the type OID.
+        with connection.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        self._conn.commit()
-        register_vector(self._conn)
-        self._migrate()
+        connection.commit()
+        self._register_vector(connection)
+        connection.commit()
 
     def _migrate(self) -> None:
         dim = self.embedding_dim
-        with self._conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS beliefs (
-                    id TEXT PRIMARY KEY,
-                    content TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    confidence DOUBLE PRECISION NOT NULL,
-                    valid_from TIMESTAMPTZ,
-                    valid_to TIMESTAMPTZ,
-                    supersedes_id TEXT,
-                    scope TEXT NOT NULL,
-                    user_id TEXT,
-                    session_id TEXT,
-                    agent_id TEXT,
-                    project_id TEXT,
-                    source TEXT NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL,
-                    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+        with self._pool.connection() as connection:
+            with connection.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS beliefs (
+                        id TEXT PRIMARY KEY,
+                        content TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        confidence DOUBLE PRECISION NOT NULL,
+                        valid_from TIMESTAMPTZ,
+                        valid_to TIMESTAMPTZ,
+                        supersedes_id TEXT,
+                        scope TEXT NOT NULL,
+                        user_id TEXT,
+                        session_id TEXT,
+                        agent_id TEXT,
+                        project_id TEXT,
+                        source TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL,
+                        metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+                    )
+                    """
                 )
-                """
-            )
-            # Rebuild embeddings if vector size does not match this process
-            cur.execute(
-                """
-                SELECT format_type(a.atttypid, a.atttypmod) AS typ
-                FROM pg_attribute a
-                JOIN pg_class c ON a.attrelid = c.oid
-                JOIN pg_namespace n ON c.relnamespace = n.oid
-                WHERE c.relname = 'embeddings'
-                  AND n.nspname = 'public'
-                  AND a.attname = 'embedding'
-                  AND NOT a.attisdropped
-                """
-            )
-            typ_row = cur.fetchone()
-            expected = f"vector({dim})"
-            if typ_row and typ_row.get("typ"):
-                actual = str(typ_row["typ"]).replace(" ", "")
-                if actual != expected:
-                    cur.execute("DROP TABLE embeddings CASCADE")
+                # Rebuild embeddings if vector size does not match this process
+                cur.execute(
+                    """
+                    SELECT format_type(a.atttypid, a.atttypmod) AS typ
+                    FROM pg_attribute a
+                    JOIN pg_class c ON a.attrelid = c.oid
+                    JOIN pg_namespace n ON c.relnamespace = n.oid
+                    WHERE c.relname = 'embeddings'
+                      AND n.nspname = 'public'
+                      AND a.attname = 'embedding'
+                      AND NOT a.attisdropped
+                    """
+                )
+                typ_row = cur.fetchone()
+                expected = f"vector({dim})"
+                if typ_row and typ_row.get("typ"):
+                    actual = str(typ_row["typ"]).replace(" ", "")
+                    if actual != expected:
+                        cur.execute("DROP TABLE embeddings CASCADE")
 
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS embeddings (
-                    belief_id TEXT PRIMARY KEY
-                        REFERENCES beliefs(id) ON DELETE CASCADE,
-                    embedding vector({dim}) NOT NULL,
-                    dim INTEGER NOT NULL
+                cur.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS embeddings (
+                        belief_id TEXT PRIMARY KEY
+                            REFERENCES beliefs(id) ON DELETE CASCADE,
+                        embedding vector({dim}) NOT NULL,
+                        dim INTEGER NOT NULL
+                    )
+                    """
                 )
-                """
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_beliefs_user ON beliefs(user_id)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_beliefs_project ON beliefs(project_id)"
-            )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_beliefs_status ON beliefs(status)"
-            )
-        self._conn.commit()
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_beliefs_user ON beliefs(user_id)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_beliefs_project ON beliefs(project_id)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_beliefs_status ON beliefs(status)"
+                )
 
         # Optional ANN index (pgvector HNSW) — ignore if unsupported
         try:
-            with self._conn.cursor() as cur:
-                cur.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_embeddings_hnsw
-                    ON embeddings
-                    USING hnsw (embedding vector_cosine_ops)
-                    """
-                )
-            self._conn.commit()
+            with self._pool.connection() as connection:
+                with connection.cursor() as cur:
+                    cur.execute(
+                        """
+                        CREATE INDEX IF NOT EXISTS idx_embeddings_hnsw
+                        ON embeddings
+                        USING hnsw (embedding vector_cosine_ops)
+                        """
+                    )
         except Exception:
-            self._conn.rollback()
+            pass
 
     def close(self) -> None:
-        self._conn.close()
+        if not self._closed:
+            self._pool.close()
+            self._closed = True
 
     def __enter__(self) -> PostgresBeliefStore:
         return self
@@ -182,13 +195,29 @@ class PostgresBeliefStore:
         self.close()
 
     def get(self, belief_id: str) -> Belief | None:
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as connection:
+            return self._get_on_connection(connection, belief_id)
+
+    def delete_by_user(self, user_id: str) -> int:
+        if not user_id.strip():
+            raise ValueError("user_id must be non-empty")
+        with self._pool.connection() as connection:
+            with connection.cursor() as cur:
+                cur.execute("DELETE FROM beliefs WHERE user_id = %s", (user_id,))
+                return cur.rowcount
+
+    def _get_on_connection(self, connection: Any, belief_id: str) -> Belief | None:
+        with connection.cursor() as cur:
             cur.execute("SELECT * FROM beliefs WHERE id = %s", (belief_id,))
             row = cur.fetchone()
             return _row_to_belief(row) if row else None
 
     def upsert(self, belief: Belief) -> None:
-        with self._conn.cursor() as cur:
+        with self._pool.connection() as connection:
+            self._upsert_on_connection(connection, belief)
+
+    def _upsert_on_connection(self, connection: Any, belief: Belief) -> None:
+        with connection.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO beliefs (
@@ -236,7 +265,6 @@ class PostgresBeliefStore:
                     json.dumps(belief.metadata),
                 ),
             )
-        self._conn.commit()
 
     def set_status(
         self,
@@ -245,17 +273,117 @@ class PostgresBeliefStore:
         *,
         valid_to: datetime | None = None,
     ) -> Belief | None:
-        belief = self.get(belief_id)
-        if belief is None:
-            return None
-        updates: dict[str, Any] = {
-            "status": status,
-            "updated_at": utc_now(),
-        }
-        if valid_to is not None:
-            updates["valid_to"] = valid_to
-        self.upsert(belief.model_copy(update=updates))
-        return self.get(belief_id)
+        updated_at = utc_now()
+        if valid_to is None:
+            sql = """
+                UPDATE beliefs
+                SET status = %s, updated_at = %s
+                WHERE id = %s
+                RETURNING *
+            """
+            params = (status.value, updated_at, belief_id)
+        else:
+            sql = """
+                UPDATE beliefs
+                SET status = %s, updated_at = %s, valid_to = %s
+                WHERE id = %s
+                RETURNING *
+            """
+            params = (status.value, updated_at, valid_to, belief_id)
+
+        with self._pool.connection() as connection:
+            with connection.cursor() as cur:
+                cur.execute(sql, params)
+                row = cur.fetchone()
+        return _row_to_belief(row) if row else None
+
+    def supersede_if_owned(
+        self,
+        target_id: str,
+        replacement: Belief,
+        replacement_embedding: list[float],
+        *,
+        expected_user_id: str,
+        superseded_at: datetime,
+    ) -> bool:
+        if replacement.scope_ids.user_id != expected_user_id:
+            return False
+        if len(replacement_embedding) != self.embedding_dim:
+            raise ValueError(
+                f"embedding dim {len(replacement_embedding)} != store dim "
+                f"{self.embedding_dim}"
+            )
+        with self._pool.connection() as connection:
+            with connection.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id FROM beliefs
+                    WHERE id = %s AND user_id = %s AND status = %s
+                    FOR UPDATE
+                    """,
+                    (target_id, expected_user_id, BeliefStatus.ACTIVE.value),
+                )
+                if cur.fetchone() is None:
+                    return False
+            self._upsert_on_connection(connection, replacement)
+            self._save_embedding_on_connection(
+                connection,
+                replacement.id,
+                replacement_embedding,
+            )
+            with connection.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE beliefs
+                    SET status = %s, valid_to = %s, updated_at = %s
+                    WHERE id = %s
+                    """,
+                    (
+                        BeliefStatus.SUPERSEDED.value,
+                        superseded_at,
+                        superseded_at,
+                        target_id,
+                    ),
+                )
+        return True
+
+    def invalidate_if_owned(
+        self,
+        belief_id: str,
+        *,
+        expected_user_id: str,
+        reason: str | None,
+        invalidated_at: datetime,
+    ) -> bool:
+        reason_metadata = json.dumps({"invalidate_reason": reason})
+        with self._pool.connection() as connection:
+            with connection.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE beliefs
+                    SET status = %s,
+                        valid_to = %s,
+                        updated_at = %s,
+                        metadata = CASE
+                            WHEN %s IS NULL OR %s = '' THEN metadata
+                            ELSE metadata || %s::jsonb
+                        END
+                    WHERE id = %s AND user_id = %s AND status = %s
+                    RETURNING id
+                    """,
+                    (
+                        BeliefStatus.INVALIDATED.value,
+                        invalidated_at,
+                        invalidated_at,
+                        reason,
+                        reason,
+                        reason_metadata,
+                        belief_id,
+                        expected_user_id,
+                        BeliefStatus.ACTIVE.value,
+                    ),
+                )
+                return cur.fetchone() is not None
 
     def list_by_scope(
         self,
@@ -277,50 +405,60 @@ class PostgresBeliefStore:
                 clauses.append(f"{col} = %s")
                 params.append(val)
         sql = "SELECT * FROM beliefs WHERE " + " AND ".join(clauses)
-        with self._conn.cursor() as cur:
-            cur.execute(sql, params)
-            out: list[Belief] = []
-            for row in cur.fetchall():
-                belief = _row_to_belief(row)
-                if scope_filter.matches(belief.scope_ids):
-                    out.append(belief)
-            return out
+        with self._pool.connection() as connection:
+            with connection.cursor() as cur:
+                cur.execute(sql, params)
+                out: list[Belief] = []
+                for row in cur.fetchall():
+                    belief = _row_to_belief(row)
+                    if scope_filter.matches(belief.scope_ids):
+                        out.append(belief)
+                return out
 
     def save_embedding(self, belief_id: str, vector: list[float]) -> None:
-        if self.get(belief_id) is None:
-            raise KeyError(f"cannot embed unknown belief_id={belief_id!r}")
         if len(vector) != self.embedding_dim:
             raise ValueError(
                 f"embedding dim {len(vector)} != store dim {self.embedding_dim}. "
                 "Match embedder (text-embedding-3-small → 1536) or set embedding_dim=."
             )
-        try:
-            with self._conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO embeddings (belief_id, embedding, dim)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (belief_id) DO UPDATE SET
-                        embedding = EXCLUDED.embedding,
-                        dim = EXCLUDED.dim
-                    """,
-                    (belief_id, vector, len(vector)),
-                )
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+        with self._pool.connection() as connection:
+            if self._get_on_connection(connection, belief_id) is None:
+                raise KeyError(f"cannot embed unknown belief_id={belief_id!r}")
+            self._save_embedding_on_connection(connection, belief_id, vector)
+
+    def _save_embedding_on_connection(
+        self,
+        connection: Any,
+        belief_id: str,
+        vector: list[float],
+    ) -> None:
+        with connection.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO embeddings (belief_id, embedding, dim)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (belief_id) DO UPDATE SET
+                    embedding = EXCLUDED.embedding,
+                    dim = EXCLUDED.dim
+                """,
+                (belief_id, vector, len(vector)),
+            )
 
     def get_embedding(self, belief_id: str) -> list[float] | None:
-        with self._conn.cursor() as cur:
-            cur.execute(
-                "SELECT embedding FROM embeddings WHERE belief_id = %s",
-                (belief_id,),
-            )
-            row = cur.fetchone()
-            if row is None:
-                return None
-            return list(row["embedding"])
+        with self._pool.connection() as connection:
+            with connection.cursor() as cur:
+                cur.execute(
+                    "SELECT embedding FROM embeddings WHERE belief_id = %s",
+                    (belief_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                embedding = row["embedding"]
+                to_list = getattr(embedding, "to_list", None)
+                if callable(to_list):
+                    return list(to_list())
+                return list(embedding)
 
     def similarity_search(
         self,
@@ -360,13 +498,14 @@ class PostgresBeliefStore:
             LIMIT %s
         """
         params = [vector, *where_params, vector, k]
-        with self._conn.cursor() as cur:
-            cur.execute(sql, params)
-            results: list[ScoredBelief] = []
-            for row in cur.fetchall():
-                score = float(row["score"])
-                data = {k: v for k, v in row.items() if k != "score"}
-                belief = _row_to_belief(data)
-                if scope_filter.matches(belief.scope_ids):
-                    results.append(ScoredBelief(belief=belief, score=score))
-            return results
+        with self._pool.connection() as connection:
+            with connection.cursor() as cur:
+                cur.execute(sql, params)
+                results: list[ScoredBelief] = []
+                for row in cur.fetchall():
+                    score = float(row["score"])
+                    data = {key: value for key, value in row.items() if key != "score"}
+                    belief = _row_to_belief(data)
+                    if scope_filter.matches(belief.scope_ids):
+                        results.append(ScoredBelief(belief=belief, score=score))
+                return results

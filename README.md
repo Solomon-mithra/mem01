@@ -32,7 +32,9 @@ Agents / apps
 | **Write** (`remember`) | Messages → LLM extraction → belief ops → embed → Postgres |
 | **Read** (`recall`) | Embed query → vector search + scope filters → conflict rules → token packer → context string |
 
-Default model stack (configurable): OpenAI chat for extraction, `text-embedding-3-small` (1536-d) for vectors. Anthropic is supported for extraction; embeddings still need an embedding provider.
+Default model stack (configurable): `gpt-5.6-sol` for OpenAI extraction,
+`text-embedding-3-small` (1536-d) for vectors. Anthropic is supported for
+extraction; embeddings still need an embedding provider.
 
 ---
 
@@ -48,7 +50,12 @@ Set at least:
 
 ```bash
 OPENAI_API_KEY=sk-...
+MEM01_LLM_MODEL=gpt-5.6-sol
 ```
+
+`MEM01_LLM_MODEL` is passed into the API container by Docker Compose and selected
+by the API at startup. `gpt-5.6-sol` is the default for both the API and the
+embedded Mem01Session runtime.
 
 Docker Compose sets `DATABASE_URL` for the API container. Host-side Python tools should use:
 
@@ -218,9 +225,8 @@ print(block.text, block.tokens_used, block.latency_ms)
 | `OPENAI_API_KEY` | For real extract/embed | OpenAI (or compatible) API key |
 | `DATABASE_URL` | For API / SDK | `postgresql://...` (Docker host: port **5433**) |
 | `MEM01_EMBEDDING_DIM` | No (default `1536`) | Must match embedding model dimensions |
-| `OPENAI_BASE_URL` | No | Custom OpenAI-compatible base URL |
-| `MEM01_LLM_MODEL` | No | Extraction model name |
-| `MEM01_EMBED_MODEL` | No | Embedding model name |
+| `MEM01_LLM_MODEL` | No (default `gpt-5.6-sol`) | OpenAI extraction model used by the API and embedded runtime |
+| `MEM01_EMBEDDING_MODEL` | No (default `text-embedding-3-small`) | OpenAI embedding model name |
 
 **Neon:** use a Neon connection string as `DATABASE_URL` (include `sslmode=require`). No application code changes.
 

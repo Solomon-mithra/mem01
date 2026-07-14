@@ -48,25 +48,47 @@ def apply_ops(
     embedder: Embedder,
     *,
     default_source: BeliefSource = BeliefSource.EXTRACTION,
+    expected_user_id: str | None = None,
 ) -> ApplyResult:
     """Execute ops in order against *store*. Embeds any new/changed content."""
     result = ApplyResult()
     for op in ops:
         try:
             if op.op == BeliefOpType.ADD:
-                _apply_add(store, op, embedder, default_source, result)
+                _apply_add(
+                    store,
+                    op,
+                    embedder,
+                    default_source,
+                    result,
+                    expected_user_id,
+                )
             elif op.op == BeliefOpType.UPDATE:
-                _apply_update(store, op, embedder, result)
+                _apply_update(store, op, embedder, result, expected_user_id)
             elif op.op == BeliefOpType.SUPERSEDE:
-                _apply_supersede(store, op, embedder, default_source, result)
+                _apply_supersede(
+                    store,
+                    op,
+                    embedder,
+                    default_source,
+                    result,
+                    expected_user_id,
+                )
             elif op.op == BeliefOpType.INVALIDATE:
-                _apply_invalidate(store, op, result)
+                _apply_invalidate(store, op, result, expected_user_id)
             elif op.op == BeliefOpType.MERGE:
-                _apply_merge(store, op, embedder, default_source, result)
+                _apply_merge(
+                    store,
+                    op,
+                    embedder,
+                    default_source,
+                    result,
+                    expected_user_id,
+                )
             else:
                 result.errors.append(f"unknown op type: {op.op!r}")
         except Exception as exc:  # keep batch resilient; one bad op shouldn't abort all
-            result.errors.append(f"{op.op.value}: {exc}")
+            result.errors.append(f"{op.op.value}: {_safe_error_category(exc)}")
     return result
 
 
@@ -87,6 +109,7 @@ def _apply_add(
     embedder: Embedder,
     source: BeliefSource,
     result: ApplyResult,
+    expected_user_id: str | None,
 ) -> None:
     assert op.content is not None
     now = utc_now()
@@ -104,6 +127,7 @@ def _apply_add(
         updated_at=now,
         metadata=_metadata_with_topic(op),
     )
+    _assert_output_user(belief.scope_ids, expected_user_id)
     store.upsert(belief)
     _embed_and_save(store, embedder, belief.id, belief.content)
     result.created_ids.append(belief.id)
@@ -114,12 +138,14 @@ def _apply_update(
     op: BeliefOp,
     embedder: Embedder,
     result: ApplyResult,
+    expected_user_id: str | None,
 ) -> None:
     if not op.target_id:
         raise ValueError("UPDATE requires target_id")
     existing = store.get(op.target_id)
     if existing is None:
         raise KeyError(f"UPDATE target not found: {op.target_id}")
+    _assert_user_ownership(existing, expected_user_id)
     if existing.status != BeliefStatus.ACTIVE:
         raise ValueError(f"UPDATE target is not active: {op.target_id} ({existing.status})")
 
@@ -148,6 +174,7 @@ def _apply_supersede(
     embedder: Embedder,
     source: BeliefSource,
     result: ApplyResult,
+    expected_user_id: str | None,
 ) -> None:
     """New active belief replaces an old one (core of anti-staleness)."""
     if not op.target_id or not op.content:
@@ -176,10 +203,22 @@ def _apply_supersede(
         updated_at=now,
         metadata=_metadata_with_topic(op) or dict(old.metadata),
     )
-    store.upsert(new_belief)
-    _embed_and_save(store, embedder, new_belief.id, new_belief.content)
-
-    store.set_status(old.id, BeliefStatus.SUPERSEDED, valid_to=now)
+    _assert_output_user(new_belief.scope_ids, expected_user_id)
+    replacement_embedding = embedder.embed(new_belief.content)
+    if expected_user_id is not None:
+        changed = store.supersede_if_owned(
+            old.id,
+            new_belief,
+            replacement_embedding,
+            expected_user_id=expected_user_id,
+            superseded_at=now,
+        )
+        if not changed:
+            raise PermissionError("target does not belong to expected user or is not active")
+    else:
+        store.upsert(new_belief)
+        store.save_embedding(new_belief.id, replacement_embedding)
+        store.set_status(old.id, BeliefStatus.SUPERSEDED, valid_to=now)
     result.created_ids.append(new_belief.id)
     result.superseded_ids.append(old.id)
 
@@ -188,13 +227,26 @@ def _apply_invalidate(
     store: BeliefStore,
     op: BeliefOp,
     result: ApplyResult,
+    expected_user_id: str | None,
 ) -> None:
     if not op.target_id:
         raise ValueError("INVALIDATE requires target_id")
+    now = utc_now()
+    if expected_user_id is not None:
+        changed = store.invalidate_if_owned(
+            op.target_id,
+            expected_user_id=expected_user_id,
+            reason=op.reason,
+            invalidated_at=now,
+        )
+        if not changed:
+            raise PermissionError("target does not belong to expected user or is not active")
+        result.invalidated_ids.append(op.target_id)
+        return
+
     existing = store.get(op.target_id)
     if existing is None:
         raise KeyError(f"INVALIDATE target not found: {op.target_id}")
-    now = utc_now()
     store.set_status(op.target_id, BeliefStatus.INVALIDATED, valid_to=now)
     # Optional reason in metadata
     if op.reason:
@@ -212,6 +264,7 @@ def _apply_merge(
     embedder: Embedder,
     source: BeliefSource,
     result: ApplyResult,
+    expected_user_id: str | None,
 ) -> None:
     """Collapse multiple beliefs into one canonical active belief."""
     ids: list[str] = list(op.target_ids)
@@ -232,6 +285,7 @@ def _apply_merge(
         b = store.get(bid)
         if b is None:
             raise KeyError(f"MERGE target not found: {bid}")
+        _assert_user_ownership(b, expected_user_id)
         beliefs.append(b)
 
     now = utc_now()
@@ -258,6 +312,7 @@ def _apply_merge(
             "merged_from": unique_ids,
         },
     )
+    _assert_output_user(canonical.scope_ids, expected_user_id)
     store.upsert(canonical)
     _embed_and_save(store, embedder, canonical.id, canonical.content)
 
@@ -274,3 +329,28 @@ def _scope_ids_any(scope_ids: ScopeIds) -> bool:
         getattr(scope_ids, name) is not None
         for name in ("user_id", "session_id", "agent_id", "project_id")
     )
+
+
+def _assert_user_ownership(belief: Belief, expected_user_id: str | None) -> None:
+    if expected_user_id is None:
+        return
+    if belief.scope_ids.user_id != expected_user_id:
+        raise PermissionError("target does not belong to expected user")
+
+
+def _assert_output_user(scope_ids: ScopeIds, expected_user_id: str | None) -> None:
+    if expected_user_id is None:
+        return
+    if scope_ids.user_id != expected_user_id:
+        raise PermissionError("output does not belong to expected user")
+
+
+def _safe_error_category(exc: Exception) -> str:
+    """Map failures to stable public categories without exposing exception text."""
+    if isinstance(exc, PermissionError):
+        return "permission denied"
+    if isinstance(exc, KeyError):
+        return "target not found"
+    if isinstance(exc, (AssertionError, ValueError)):
+        return "invalid operation"
+    return "operation failed"

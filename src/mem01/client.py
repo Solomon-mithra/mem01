@@ -100,6 +100,7 @@ class MemoryClient:
                 ops,
                 self.embedder,
                 default_source=BeliefSource.EXTRACTION,
+                expected_user_id=scope_ids.user_id,
             )
         return RememberResult(
             apply=apply_result,
@@ -179,6 +180,7 @@ class MemoryClient:
         memory_id: str,
         new_value: str,
         *,
+        user_id: str | None = None,
         confidence: float = 0.95,
     ) -> ApplyResult:
         """Human/agent fix: SUPERSEDE by id (no LLM)."""
@@ -193,9 +195,16 @@ class MemoryClient:
             [op],
             self.embedder,
             default_source=BeliefSource.CORRECTION,
+            expected_user_id=self._scope_ids(user_id).user_id,
         )
 
-    def forget(self, memory_id: str, *, reason: str | None = None) -> ApplyResult:
+    def forget(
+        self,
+        memory_id: str,
+        *,
+        user_id: str | None = None,
+        reason: str | None = None,
+    ) -> ApplyResult:
         """Invalidate a belief by id (no LLM)."""
         op = BeliefOp(
             op=BeliefOpType.INVALIDATE,
@@ -207,7 +216,15 @@ class MemoryClient:
             [op],
             self.embedder,
             default_source=BeliefSource.FORGET,
+            expected_user_id=self._scope_ids(user_id).user_id,
         )
+
+    def clear_user(self, *, user_id: str | None = None) -> int:
+        """Hard-delete all stored beliefs for one user."""
+        resolved_user_id = user_id if user_id is not None else self.default_user_id
+        if resolved_user_id is None or not resolved_user_id.strip():
+            raise ValueError("user_id must be non-empty")
+        return self.store.delete_by_user(resolved_user_id)
 
     def get(self, memory_id: str) -> Belief | None:
         return self.store.get(memory_id)

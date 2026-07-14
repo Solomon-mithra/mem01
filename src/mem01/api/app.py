@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from mem01.client import MemoryClient
 from mem01.env import load_env
+from mem01.runtime import build_openai_memory_client
 from mem01.store.factory import create_belief_store
 
 
@@ -47,36 +48,34 @@ class HistoryBody(BaseModel):
 
 
 class CorrectBody(BaseModel):
+    user_id: str
     memory_id: str
     new_value: str
     confidence: float = Field(default=0.95, ge=0.0, le=1.0)
 
 
 class ForgetBody(BaseModel):
+    user_id: str
     memory_id: str
     reason: str | None = None
 
 
 def _build_client() -> MemoryClient:
     load_env()
-    store = create_belief_store()
     # Prefer real OpenAI when key present; else Fake for health-only deploys
     import os
 
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if key:
-        from mem01.embeddings.openai_embedder import OpenAIEmbedder
-        from mem01.llm.openai_compat import OpenAICompatLLM
+        return build_openai_memory_client()
 
-        embedder = OpenAIEmbedder()
-        llm = OpenAICompatLLM()
-    else:
-        from mem01.embeddings.fake import FakeEmbedder
-        from mem01.llm.fake import FakeLLM
+    store = create_belief_store()
+    from mem01.embeddings.fake import FakeEmbedder
+    from mem01.llm.fake import FakeLLM
 
-        dim = int(os.environ.get("MEM01_EMBEDDING_DIM", "1536"))
-        embedder = FakeEmbedder(dimensions=dim)
-        llm = FakeLLM("[]")
+    dim = int(os.environ.get("MEM01_EMBEDDING_DIM", "1536"))
+    embedder = FakeEmbedder(dimensions=dim)
+    llm = FakeLLM("[]")
     return MemoryClient(store=store, embedder=embedder, llm=llm)
 
 
@@ -99,7 +98,15 @@ app = FastAPI(
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "mem01"}
+    llm = app.state.client.llm
+    extraction_model = getattr(llm, "model", None)
+    if not isinstance(extraction_model, str) or not extraction_model:
+        extraction_model = "fake" if type(llm).__name__ == "FakeLLM" else "unknown"
+    return {
+        "status": "ok",
+        "service": "mem01",
+        "extraction_model": extraction_model,
+    }
 
 
 @app.post("/v1/remember")
@@ -156,8 +163,11 @@ def recall(body: RecallBody) -> dict[str, Any]:
                 "content": b.content,
                 "status": b.status.value,
                 "supersedes_id": b.supersedes_id,
+                "source": b.source.value,
                 "valid_from": b.valid_from.isoformat() if b.valid_from else None,
                 "valid_to": b.valid_to.isoformat() if b.valid_to else None,
+                "created_at": b.created_at.isoformat(),
+                "updated_at": b.updated_at.isoformat(),
             }
             for b in packed.beliefs
         ],
@@ -204,7 +214,10 @@ def correct(body: CorrectBody) -> dict[str, Any]:
     client: MemoryClient = app.state.client
     try:
         result = client.correct(
-            body.memory_id, body.new_value, confidence=body.confidence
+            body.memory_id,
+            body.new_value,
+            user_id=body.user_id,
+            confidence=body.confidence,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -220,7 +233,11 @@ def correct(body: CorrectBody) -> dict[str, Any]:
 def forget(body: ForgetBody) -> dict[str, Any]:
     client: MemoryClient = app.state.client
     try:
-        result = client.forget(body.memory_id, reason=body.reason)
+        result = client.forget(
+            body.memory_id,
+            user_id=body.user_id,
+            reason=body.reason,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return {

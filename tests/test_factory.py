@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+import mem01.store.factory as store_factory
 from mem01.store.factory import create_belief_store
 from mem01.store.memory_store import InMemoryBeliefStore
 
@@ -17,6 +18,7 @@ def test_factory_memory_backend(monkeypatch):
 
 
 def test_factory_requires_database_url(monkeypatch):
+    monkeypatch.setattr(store_factory, "load_env", lambda: [])
     monkeypatch.delenv("MEM01_STORE", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("MEM01_DATABASE_URL", raising=False)

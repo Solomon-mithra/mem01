@@ -25,7 +25,7 @@ class OpenAICompatLLM:
         self,
         *,
         api_key: str | None = None,
-        model: str = "gpt-4o-mini",
+        model: str = "gpt-5.6-sol",
         base_url: str = "https://api.openai.com/v1",
     ) -> None:
         if api_key is None:
@@ -56,9 +56,10 @@ class OpenAICompatLLM:
         url = f"{self.base_url}/chat/completions"
         body = {
             "model": self.model,
-            "temperature": temperature,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
         }
+        if self.model != "gpt-5.6-sol":
+            body["temperature"] = temperature
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             url,

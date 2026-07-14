@@ -7,7 +7,7 @@ import json
 import pytest
 
 from mem01.llm.fake import FakeLLM
-from mem01.types import Belief, BeliefOpType, ScopeIds
+from mem01.types import Belief, BeliefOpType, ScopeIds, ScopeKind
 from mem01.write.apply_ops import apply_ops
 from mem01.write.extractor import extract_ops
 from mem01.embeddings.fake import FakeEmbedder
@@ -35,6 +35,43 @@ def test_extract_add_ops_from_scripted_llm():
     assert ops[0].scope_ids.user_id == "u1"
     assert ops[0].topic_key == "language_pref"
     assert llm.call_count == 1
+
+
+def test_extractor_overwrites_model_scope_with_caller_authority() -> None:
+    llm = FakeLLM(
+        json.dumps(
+            [
+                {
+                    "op": "ADD",
+                    "content": "scoped fact",
+                    "scope": "user",
+                    "scope_ids": {
+                        "user_id": "same-user",
+                        "project_id": "spoofed-project",
+                        "session_id": "spoofed-session",
+                    },
+                }
+            ]
+        )
+    )
+
+    ops = extract_ops(
+        [{"role": "user", "content": "remember in trusted project"}],
+        llm=llm,
+        scope=ScopeKind.PROJECT,
+        scope_ids=ScopeIds(
+            user_id="same-user",
+            project_id="trusted-project",
+            session_id="trusted-session",
+        ),
+    )
+
+    assert ops[0].scope == ScopeKind.PROJECT
+    assert ops[0].scope_ids == ScopeIds(
+        user_id="same-user",
+        project_id="trusted-project",
+        session_id="trusted-session",
+    )
 
 
 def test_extract_supersede_with_existing_belief_context():
@@ -119,7 +156,9 @@ def test_extract_drops_invalid_ops_keeps_valid():
 
 # Real malformed output observed from gpt-4o-mini during a LoCoMo benchmark run:
 # `=` instead of `:` inside an object key ("topic_key=self_identity").
-MALFORMED = '[{"op":"ADD","content":"Caroline went biking","confidence":0.9,"topic_key=self_identity"}]'
+MALFORMED = (
+    '[{"op":"ADD","content":"Caroline went biking","confidence":0.9,"topic_key=self_identity"}]'
+)
 
 
 def test_extract_retries_once_on_malformed_json():

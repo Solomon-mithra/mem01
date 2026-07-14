@@ -94,6 +94,37 @@ def test_list_by_scope_project_filter(store: InMemoryBeliefStore):
     assert [x.id for x in listed] == [p1.id]
 
 
+def test_delete_by_user_removes_beliefs_and_embeddings_only_for_that_user(
+    store: InMemoryBeliefStore,
+) -> None:
+    first = _belief("first", user_id="delete-me")
+    second = _belief("second", user_id="delete-me")
+    preserved = _belief("preserved", user_id="keep-me")
+    for belief in (first, second, preserved):
+        store.upsert(belief)
+        store.save_embedding(belief.id, [1.0, 0.0])
+
+    deleted = store.delete_by_user("delete-me")
+
+    assert deleted == 2
+    assert store.get(first.id) is None
+    assert store.get(second.id) is None
+    assert store.get_embedding(first.id) is None
+    assert store.get_embedding(second.id) is None
+    assert store.get(preserved.id) == preserved
+    assert store.get_embedding(preserved.id) == [1.0, 0.0]
+    assert store.delete_by_user("delete-me") == 0
+
+
+@pytest.mark.parametrize("user_id", ["", "   "])
+def test_delete_by_user_rejects_blank_user_id(
+    store: InMemoryBeliefStore,
+    user_id: str,
+) -> None:
+    with pytest.raises(ValueError, match="user_id"):
+        store.delete_by_user(user_id)
+
+
 def test_cosine_similarity_identical_and_orthogonal():
     assert cosine_similarity([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
     assert cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
@@ -146,3 +177,52 @@ def test_get_returns_copy_not_alias(store: InMemoryBeliefStore):
     mutated = got.model_copy(update={"content": "hacked"})
     assert store.get(b.id).content == "immutable inside"
     assert mutated.content == "hacked"
+
+
+def test_conditional_supersede_is_atomic_and_rejects_wrong_user(
+    store: InMemoryBeliefStore,
+) -> None:
+    old = _belief("victim fact", user_id="victim")
+    replacement = _belief("attacker replacement", user_id="victim")
+    store.upsert(old)
+
+    changed = store.supersede_if_owned(
+        old.id,
+        replacement,
+        [1.0, 0.0],
+        expected_user_id="attacker",
+        superseded_at=utc_now(),
+    )
+
+    assert changed is False
+    assert store.get(old.id).status == BeliefStatus.ACTIVE
+    assert store.get(replacement.id) is None
+    assert store.get_embedding(replacement.id) is None
+
+
+def test_conditional_invalidate_updates_only_owned_active_target(
+    store: InMemoryBeliefStore,
+) -> None:
+    victim = _belief("victim fact", user_id="victim")
+    store.upsert(victim)
+    when = utc_now()
+
+    rejected = store.invalidate_if_owned(
+        victim.id,
+        expected_user_id="attacker",
+        reason="malicious",
+        invalidated_at=when,
+    )
+    changed = store.invalidate_if_owned(
+        victim.id,
+        expected_user_id="victim",
+        reason="user request",
+        invalidated_at=when,
+    )
+
+    assert rejected is False
+    assert changed is True
+    updated = store.get(victim.id)
+    assert updated is not None
+    assert updated.status == BeliefStatus.INVALIDATED
+    assert updated.metadata["invalidate_reason"] == "user request"
